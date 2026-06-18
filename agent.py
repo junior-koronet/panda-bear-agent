@@ -19,6 +19,8 @@ import numpy as np
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from groq import Groq
@@ -635,6 +637,13 @@ def notify_approver(batch_id: int, new_employees: list):
 
 app = FastAPI(title="Panda Bear Agent API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+@app.get("/")
+def serve_dashboard():
+    dashboard_path = os.path.join(BASE_DIR, "panda-bear-agent-v3.html")
+    if os.path.exists(dashboard_path):
+        return FileResponse(dashboard_path)
+    return {"message": "Panda Bear Agent API running 🐼"}
 
 
 class SyncRequest(BaseModel):
