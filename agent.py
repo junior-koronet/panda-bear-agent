@@ -651,7 +651,7 @@ def notify_approver(batch_id: int, new_employees: list):
 # ─── FASTAPI ──────────────────────────────────────────────────
 
 app = FastAPI(title="Panda Bear Agent API")
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"], allow_credentials=True)
 
 security = HTTPBasic()
 
@@ -880,6 +880,11 @@ def reset_db():
     conn.execute("DELETE FROM messages")
     conn.execute("DELETE FROM batches")
     conn.execute("DELETE FROM runs")
+    # Forzar migración
+    try:
+        conn.execute("ALTER TABLE batches ADD COLUMN employeeName TEXT")
+    except:
+        pass
     conn.commit()
     conn.close()
     return {"reset": True}
