@@ -342,11 +342,11 @@
 </div>
 
 <script>
-let API_URL = localStorage.getItem('panda_api_url') || 'https://panda-bear-agent.onrender.com';
+let API_URL = '';
 let currentPage = 'dashboard';
 let toastTimer = null;
 
-document.getElementById('api-url').value = API_URL;
+document.getElementById('api-url').value = window.location.origin;
 
 function saveConfig() {
   const val = document.getElementById('api-url').value.trim().replace(/\/$/, '');
@@ -368,7 +368,9 @@ function showToast(msg, d=3000) {
 async function apiFetch(path, options={}) {
   if (!API_URL) throw new Error('No API URL');
   const res = await fetch(API_URL + '/api' + path, {
-    headers: {'Content-Type': 'application/json'}, ...options
+    headers: {'Content-Type': 'application/json'},
+    credentials: 'include',
+    ...options
   });
   if (!res.ok) throw new Error('HTTP ' + res.status);
   return res.json();
