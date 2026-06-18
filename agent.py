@@ -688,7 +688,7 @@ class EditRequest(BaseModel):
 
 
 @app.get("/api/agent/stats")
-def get_stats(user: str = Depends(verify_credentials)):
+def get_stats():
     conn = get_db()
     c = conn.cursor()
     total_sent   = c.execute("SELECT COUNT(*) FROM messages WHERE status='sent'").fetchone()[0]
@@ -725,7 +725,7 @@ def get_integrations():
 
 
 @app.get("/api/agent/messages")
-def get_messages(user: str = Depends(verify_credentials)):
+def get_messages():
     conn = get_db()
     msgs = conn.execute("SELECT * FROM messages ORDER BY createdAt DESC").fetchall()
     conn.close()
@@ -733,7 +733,7 @@ def get_messages(user: str = Depends(verify_credentials)):
 
 
 @app.get("/api/agent/runs")
-def get_runs(user: str = Depends(verify_credentials)):
+def get_runs():
     conn = get_db()
     runs = conn.execute("SELECT * FROM runs ORDER BY startedAt DESC").fetchall()
     conn.close()
@@ -741,7 +741,7 @@ def get_runs(user: str = Depends(verify_credentials)):
 
 
 @app.get("/api/agent/batches")
-def get_batches(user: str = Depends(verify_credentials)):
+def get_batches():
     conn = get_db()
     batches = conn.execute(
         "SELECT * FROM batches WHERE status='pending_approval' ORDER BY createdAt DESC"
@@ -762,7 +762,7 @@ def get_batch(batch_id: int):
 
 
 @app.post("/api/agent/batches/{batch_id}/approve")
-def approve_batch(batch_id: int, user: str = Depends(verify_credentials)):
+def approve_batch(batch_id: int):
     conn = get_db()
     c = conn.cursor()
     msgs = c.execute(
@@ -784,7 +784,7 @@ def approve_batch(batch_id: int, user: str = Depends(verify_credentials)):
 
 
 @app.post("/api/agent/batches/{batch_id}/reject")
-def reject_batch(batch_id: int, user: str = Depends(verify_credentials)):
+def reject_batch(batch_id: int):
     conn = get_db()
     conn.execute("UPDATE batches SET status='rejected', rejectedAt=? WHERE id=?",
                  (datetime.now().isoformat(), batch_id))
@@ -819,7 +819,7 @@ def edit_message(msg_id: int, body: EditRequest):
 
 
 @app.post("/api/agent/messages/{msg_id}/skip")
-def skip_message(msg_id: int, user: str = Depends(verify_credentials)):
+def skip_message(msg_id: int):
     conn = get_db()
     conn.execute("UPDATE messages SET status='skipped' WHERE id=?", (msg_id,))
     conn.commit()
@@ -828,7 +828,7 @@ def skip_message(msg_id: int, user: str = Depends(verify_credentials)):
 
 
 @app.post("/api/agent/messages/{msg_id}/resend")
-def resend_message(msg_id: int, user: str = Depends(verify_credentials)):
+def resend_message(msg_id: int):
     conn = get_db()
     conn.execute("UPDATE messages SET status='sent', sentAt=? WHERE id=?",
                  (datetime.now().isoformat(), msg_id))
@@ -838,7 +838,7 @@ def resend_message(msg_id: int, user: str = Depends(verify_credentials)):
 
 
 @app.post("/api/agent/messages/{msg_id}/test-dm")
-def test_dm(msg_id: int, user: str = Depends(verify_credentials)):
+def test_dm(msg_id: int):
     conn = get_db()
     msg = conn.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
     conn.close()
@@ -875,7 +875,7 @@ def test_dm(msg_id: int, user: str = Depends(verify_credentials)):
 
 
 @app.post("/api/agent/reset")
-def reset_db(user: str = Depends(verify_credentials)):
+def reset_db():
     conn = get_db()
     conn.execute("DELETE FROM messages")
     conn.execute("DELETE FROM batches")
@@ -888,7 +888,7 @@ def reset_db(user: str = Depends(verify_credentials)):
 
 
 @app.get("/api/agent/recent-hires")
-def recent_hires(user: str = Depends(verify_credentials)):
+def recent_hires():
     employees = bamboo_report()
     today = datetime.today()
     result = []
