@@ -466,6 +466,14 @@ def init_db():
             rejectedAt TEXT
         )
     """)
+    # Migración: agregar columna employeeName si no existe
+    try:
+        c.execute("ALTER TABLE batches ADD COLUMN employeeName TEXT")
+        conn.commit()
+        print("✅ Migración: columna employeeName agregada")
+    except:
+        pass  # Ya existe
+
     conn.commit()
     conn.close()
     print("✅ Base de datos SQLite inicializada")
