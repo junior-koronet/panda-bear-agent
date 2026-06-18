@@ -490,6 +490,13 @@ def get_db():
 def run_sync(dry_run: bool = False, lookback_days: int = 60) -> dict:
     conn = get_db()
     c = conn.cursor()
+
+    # Migración: asegurar que employeeName existe
+    try:
+        c.execute("ALTER TABLE batches ADD COLUMN employeeName TEXT")
+        conn.commit()
+    except:
+        pass
     c.execute("INSERT INTO runs (startedAt, status, dryRun) VALUES (?, 'running', ?)",
               (datetime.now().isoformat(), 1 if dry_run else 0))
     run_id = c.lastrowid
