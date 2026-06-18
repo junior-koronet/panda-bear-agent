@@ -417,7 +417,7 @@ async function renderDashboard() {
       </div>
       ${pending.map(b => `
         <div class="approval-card">
-          <div class="approval-card-title">⏳ Pending Approval — Batch #${b.id} · ${b.messageCount} message(s)</div>
+          <div class="approval-card-title">⏳ Pendiente — ${b.employeeName || 'Batch #'+b.id} · ${b.messageCount} mensaje(s)</div>
           <div style="font-size:13px;color:var(--text2);margin-bottom:12px">Waiting for your approval before sending.</div>
           <div style="display:flex;gap:8px">
             <button class="act-btn approve" onclick="approveBatch(${b.id})">✅ Approve & Send</button>

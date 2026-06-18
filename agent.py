@@ -461,6 +461,7 @@ def init_db():
             createdAt TEXT NOT NULL,
             status TEXT DEFAULT 'pending_approval',
             messageCount INTEGER DEFAULT 0,
+            employeeName TEXT,
             approvedAt TEXT,
             rejectedAt TEXT
         )
@@ -511,12 +512,6 @@ def run_sync(dry_run: bool = False, lookback_days: int = 60) -> dict:
         messages_created = 0
 
         if new_employees and not dry_run:
-            total_msgs = len(new_employees) * 3
-            c.execute("INSERT INTO batches (createdAt, messageCount) VALUES (?, ?)",
-                      (datetime.now().isoformat(), total_msgs))
-            batch_id = c.lastrowid
-            conn.commit()
-
             for emp, hire_date in new_employees:
                 emp_name  = f"{emp.get('firstName', '')} {emp.get('lastName', '')}".strip()
                 emp_id    = str(emp.get("employeeNumber", ""))
@@ -524,6 +519,12 @@ def run_sync(dry_run: bool = False, lookback_days: int = 60) -> dict:
                 location  = emp.get("location", "")
                 country   = emp.get("country", "")
                 manager   = emp.get("supervisor", "")
+
+                # Crear un batch POR EMPLEADO
+                c.execute("INSERT INTO batches (createdAt, messageCount, employeeName) VALUES (?, 3, ?)",
+                          (datetime.now().isoformat(), emp_name))
+                batch_id = c.lastrowid
+                conn.commit()
 
                 lang_info = get_language_and_time(location, country)
                 lang      = lang_info["lang"]
@@ -612,25 +613,29 @@ def run_sync(dry_run: bool = False, lookback_days: int = 60) -> dict:
 
 def notify_approver(batch_id: int, new_employees: list):
     try:
-        names = [f"{e[0].get('firstName','')} {e[0].get('lastName','')}" for e in new_employees]
-        send_dates = [get_manager_send_date(e[1]).strftime('%d/%m/%Y') for e in new_employees]
-        text = (
-            f"🐼 *Panda Bear Agent* — ¡Nuevos ingresos detectados!\n\n"
-            f"Encontré *{len(new_employees)}* nuevo(s) empleado(s):\n"
-            + "\n".join([f"• {n} (msg manager: {d})" for n, d in zip(names, send_dates)])
-            + f"\n\nBatch #{batch_id} — *{len(new_employees) * 3} mensajes* listos.\n"
-            f"👉 Abre el dashboard en http://localhost:8000 para aprobar."
-        )
-        users = slack_client.users_list()
-        juni_id = None
-        for user in users["members"]:
-            if "junior" in user.get("name", "").lower() or "juni" in user.get("real_name", "").lower():
-                juni_id = user["id"]
-                break
-        if juni_id:
-            dm = slack_client.conversations_open(users=[juni_id])
-            channel = dm["channel"]["id"]
-            slack_client.chat_postMessage(channel=channel, text=text)
+        for emp, hire_date in new_employees:
+            emp_name = f"{emp.get('firstName','')} {emp.get('lastName','')}"
+            send_date = get_manager_send_date(hire_date).strftime('%d/%m/%Y')
+            text = (
+                f"🐼 *Panda Bear Agent* — Nuevo ingreso detectado!\n\n"
+                f"👤 *{emp_name}*\n"
+                f"💼 {emp.get('jobTitle', 'N/A')}\n"
+                f"📍 {emp.get('location', 'N/A')}\n"
+                f"📅 Inicia el {hire_date.strftime('%d/%m/%Y')}\n"
+                f"👔 Manager: {emp.get('supervisor', 'N/A')}\n\n"
+                f"📨 Mensaje al manager: {send_date}\n"
+                f"👉 Abre el dashboard para aprobar los mensajes."
+            )
+            users = slack_client.users_list()
+            juni_id = None
+            for user in users["members"]:
+                if "junior" in user.get("name", "").lower() or "juni" in user.get("real_name", "").lower():
+                    juni_id = user["id"]
+                    break
+            if juni_id:
+                dm = slack_client.conversations_open(users=[juni_id])
+                channel = dm["channel"]["id"]
+                slack_client.chat_postMessage(channel=channel, text=text)
     except Exception as e:
         print(f"[Notify] Error: {e}")
 
