@@ -6,318 +6,88 @@
 <title>Panda Bear Agent 🐼</title>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
-
   :root {
-    --bg: #f5f5f5;
-    --bg2: #ffffff;
-    --bg3: #f0f0f0;
-    --border: #e5e5e5;
-    --sidebar: #111111;
-    --sidebar2: #1a1a1a;
-    --sidebar-border: #2a2a2a;
-    --teal: #00b8ad;
-    --teal2: #009990;
-    --text: #1a1a1a;
-    --text2: #555;
-    --text3: #999;
-    --green: #16a34a;
-    --yellow: #d97706;
-    --red: #dc2626;
-    --purple: #9333ea;
+    --bg: #f5f5f5; --bg2: #ffffff; --bg3: #f0f0f0; --border: #e5e5e5;
+    --sidebar: #111111; --sidebar2: #1a1a1a; --sidebar-border: #2a2a2a;
+    --teal: #00b8ad; --teal2: #009990; --text: #1a1a1a; --text2: #555;
+    --text3: #999; --green: #16a34a; --yellow: #d97706; --red: #dc2626; --purple: #9333ea;
   }
-
   * { margin: 0; padding: 0; box-sizing: border-box; }
-
-  body {
-    font-family: 'Outfit', sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    min-height: 100vh;
-    overflow-x: hidden;
-  }
-
-  .sidebar {
-    position: fixed;
-    left: 0; top: 0; bottom: 0;
-    width: 220px;
-    background: var(--sidebar);
-    display: flex;
-    flex-direction: column;
-    z-index: 100;
-  }
-
-  .logo {
-    padding: 20px;
-    border-bottom: 1px solid var(--sidebar-border);
-  }
-
-  .logo-title {
-    font-size: 16px;
-    font-weight: 800;
-    color: #fff;
-    letter-spacing: -0.5px;
-  }
-
+  body { font-family: 'Outfit', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; }
+  .sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 220px; background: var(--sidebar); display: flex; flex-direction: column; z-index: 100; }
+  .logo { padding: 20px; border-bottom: 1px solid var(--sidebar-border); }
+  .logo-title { font-size: 16px; font-weight: 800; color: #fff; }
   .logo-title span { color: var(--teal); }
-
-  .logo-sub {
-    font-size: 11px;
-    color: #555;
-    margin-top: 3px;
-    font-family: 'JetBrains Mono', monospace;
-  }
-
+  .logo-sub { font-size: 11px; color: #555; margin-top: 3px; font-family: 'JetBrains Mono', monospace; }
   .nav { padding: 12px 0; flex: 1; }
-
-  .nav-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 20px;
-    cursor: pointer;
-    color: #888;
-    font-size: 14px;
-    font-weight: 500;
-    transition: all 0.15s;
-    border-left: 2px solid transparent;
-    user-select: none;
-  }
-
+  .nav-item { display: flex; align-items: center; gap: 10px; padding: 10px 20px; cursor: pointer; color: #888; font-size: 14px; font-weight: 500; transition: all 0.15s; border-left: 2px solid transparent; }
   .nav-item:hover { color: #fff; background: var(--sidebar2); }
   .nav-item.active { color: var(--teal); border-left-color: var(--teal); background: rgba(0,184,173,0.08); }
-  .nav-icon { font-size: 15px; width: 18px; text-align: center; }
-
-  .sidebar-footer {
-    padding: 16px 20px;
-    border-top: 1px solid var(--sidebar-border);
-    font-size: 11px;
-    color: #555;
-    line-height: 1.6;
-  }
-
-  .main {
-    margin-left: 220px;
-    min-height: 100vh;
-    padding: 28px 32px;
-  }
-
-  .config-banner {
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 18px;
-    margin-bottom: 24px;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-size: 13px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.05);
-  }
-
-  .config-banner input {
-    background: var(--bg3);
-    border: 1px solid var(--border);
-    border-radius: 7px;
-    padding: 7px 12px;
-    color: var(--text);
-    font-size: 13px;
-    font-family: 'JetBrains Mono', monospace;
-    flex: 1;
-    outline: none;
-    transition: border-color 0.15s;
-  }
-
-  .config-banner input:focus { border-color: var(--teal); }
-
+  .sidebar-footer { padding: 16px 20px; border-top: 1px solid var(--sidebar-border); font-size: 11px; color: #555; line-height: 1.6; }
+  .main { margin-left: 220px; min-height: 100vh; padding: 28px 32px; }
   .page-header { margin-bottom: 24px; }
-  .page-title { font-size: 22px; font-weight: 800; letter-spacing: -0.5px; }
+  .page-title { font-size: 22px; font-weight: 800; }
   .page-sub { font-size: 13px; color: var(--text2); margin-top: 3px; }
-
-  .stats-grid {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 14px;
-    margin-bottom: 20px;
-  }
-
-  .stat-card {
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 18px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-    position: relative;
-    overflow: hidden;
-  }
-
-  .stat-card::after {
-    content: '';
-    position: absolute;
-    bottom: 0; left: 0; right: 0;
-    height: 2px;
-    background: var(--teal);
-    opacity: 0.5;
-  }
-
-  .stat-label {
-    font-size: 11px;
-    color: var(--text3);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-weight: 600;
-    margin-bottom: 10px;
-  }
-
-  .stat-value {
-    font-size: 30px;
-    font-weight: 800;
-    color: var(--text);
-    font-family: 'JetBrains Mono', monospace;
-    letter-spacing: -1px;
-  }
-
+  .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 20px; }
+  .stat-card { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; padding: 18px; }
+  .stat-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; margin-bottom: 10px; }
+  .stat-value { font-size: 30px; font-weight: 800; font-family: 'JetBrains Mono', monospace; }
   .integrations-row { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
-
-  .int-pill {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: 100px;
-    padding: 7px 14px;
-    font-size: 12px;
-    font-weight: 600;
-    color: var(--text2);
-    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-  }
-
+  .int-pill { display: flex; align-items: center; gap: 7px; background: var(--bg2); border: 1px solid var(--border); border-radius: 100px; padding: 7px 14px; font-size: 12px; font-weight: 600; color: var(--text2); }
   .dot { width: 7px; height: 7px; border-radius: 50%; }
   .dot.green { background: var(--green); box-shadow: 0 0 5px var(--green); }
   .dot.red { background: var(--red); }
-
   .btn-row { display: flex; gap: 10px; margin-bottom: 20px; flex-wrap: wrap; }
-
-  .btn-primary {
-    display: flex; align-items: center; gap: 8px;
-    background: var(--teal); color: #fff;
-    border: none; border-radius: 8px;
-    padding: 11px 22px; font-size: 14px; font-weight: 700;
-    cursor: pointer; font-family: 'Outfit', sans-serif;
-    transition: all 0.2s;
-  }
-
-  .btn-primary:hover { background: var(--teal2); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,184,173,0.3); }
-  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
-
-  .btn-secondary {
-    display: flex; align-items: center; gap: 8px;
-    background: var(--bg2); color: var(--text2);
-    border: 1px solid var(--border); border-radius: 8px;
-    padding: 11px 22px; font-size: 14px; font-weight: 600;
-    cursor: pointer; font-family: 'Outfit', sans-serif;
-    transition: all 0.15s;
-  }
-
+  .btn-primary { display: flex; align-items: center; gap: 8px; background: var(--teal); color: #fff; border: none; border-radius: 8px; padding: 11px 22px; font-size: 14px; font-weight: 700; cursor: pointer; font-family: 'Outfit', sans-serif; transition: all 0.2s; }
+  .btn-primary:hover { background: var(--teal2); }
+  .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+  .btn-secondary { display: flex; align-items: center; gap: 8px; background: var(--bg2); color: var(--text2); border: 1px solid var(--border); border-radius: 8px; padding: 11px 22px; font-size: 14px; font-weight: 600; cursor: pointer; font-family: 'Outfit', sans-serif; transition: all 0.15s; }
   .btn-secondary:hover { border-color: var(--teal); color: var(--teal); }
-
-  .section {
-    background: var(--bg2);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    overflow: hidden;
-    margin-bottom: 16px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
-  }
-
-  .section-header {
-    padding: 14px 18px;
-    border-bottom: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: space-between;
-  }
-
+  .section { background: var(--bg2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 16px; }
+  .section-header { padding: 14px 18px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; }
   .section-title { font-size: 14px; font-weight: 700; }
-  .section-sub { font-size: 12px; color: var(--text3); cursor: pointer; transition: color 0.15s; }
-  .section-sub:hover { color: var(--teal); }
-
   .table { width: 100%; border-collapse: collapse; }
-
-  .table th {
-    padding: 10px 16px; text-align: left;
-    font-size: 11px; color: var(--text3);
-    text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600;
-    background: var(--bg3); border-bottom: 1px solid var(--border);
-  }
-
-  .table td {
-    padding: 12px 16px; font-size: 13px;
-    border-bottom: 1px solid var(--border);
-    vertical-align: middle;
-  }
-
+  .table th { padding: 10px 16px; text-align: left; font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.07em; font-weight: 600; background: var(--bg3); border-bottom: 1px solid var(--border); }
+  .table td { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid var(--border); vertical-align: middle; }
   .table tr:last-child td { border-bottom: none; }
   .table tr:hover td { background: var(--bg3); }
-
-  .badge {
-    display: inline-flex; align-items: center; gap: 4px;
-    padding: 3px 9px; border-radius: 100px;
-    font-size: 11px; font-weight: 700;
-  }
-
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 100px; font-size: 11px; font-weight: 700; }
   .badge.sent { background: rgba(22,163,74,0.1); color: var(--green); }
   .badge.pending { background: rgba(217,119,6,0.1); color: var(--yellow); }
   .badge.pending_approval { background: rgba(147,51,234,0.1); color: var(--purple); }
   .badge.failed { background: rgba(220,38,38,0.1); color: var(--red); }
   .badge.skipped { background: rgba(153,153,153,0.1); color: var(--text3); }
-  .badge.rejected { background: rgba(220,38,38,0.07); color: #ef4444; }
-
-  .act-btn {
-    background: var(--bg3); border: 1px solid var(--border);
-    color: var(--text2); border-radius: 5px;
-    padding: 4px 9px; font-size: 11px; font-weight: 600;
-    cursor: pointer; font-family: 'Outfit', sans-serif;
-    transition: all 0.15s; margin-right: 4px;
-  }
-
+  .act-btn { background: var(--bg3); border: 1px solid var(--border); color: var(--text2); border-radius: 5px; padding: 4px 9px; font-size: 11px; font-weight: 600; cursor: pointer; font-family: 'Outfit', sans-serif; transition: all 0.15s; margin-right: 4px; }
   .act-btn:hover { border-color: var(--teal); color: var(--teal); }
   .act-btn.approve:hover { border-color: var(--green); color: var(--green); }
   .act-btn.reject:hover { border-color: var(--red); color: var(--red); }
-
   .empty { padding: 48px; text-align: center; color: var(--text3); font-size: 13px; }
   .empty .icon { font-size: 28px; margin-bottom: 10px; }
-
   .loading { padding: 32px; text-align: center; color: var(--text3); font-size: 13px; }
   @keyframes spin { to { transform: rotate(360deg); } }
   .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid var(--border); border-top-color: var(--teal); border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; margin-right: 6px; }
-
   .modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 1000; padding: 20px; }
   .modal { background: var(--bg2); border: 1px solid var(--border); border-radius: 14px; padding: 24px; width: 100%; max-width: 580px; max-height: 80vh; overflow-y: auto; box-shadow: 0 20px 60px rgba(0,0,0,0.15); }
   .modal-title { font-size: 16px; font-weight: 700; margin-bottom: 16px; }
   .modal textarea { width: 100%; background: var(--bg3); border: 1px solid var(--border); border-radius: 7px; padding: 10px 12px; color: var(--text); font-size: 13px; font-family: 'Outfit', sans-serif; resize: vertical; min-height: 100px; outline: none; margin-bottom: 12px; }
-  .modal textarea:focus { border-color: var(--teal); }
   .modal-actions { display: flex; gap: 8px; justify-content: flex-end; flex-wrap: wrap; }
-  .msg-preview { background: var(--bg3); border: 1px solid var(--border); border-radius: 7px; padding: 12px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; margin-bottom: 14px; max-height: 180px; overflow-y: auto; color: var(--text2); }
-  .hire-info { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; padding: 10px 12px; background: var(--bg3); border-radius: 7px; font-size: 12px; color: var(--text2); }
-
+  .msg-preview { background: var(--bg3); border: 1px solid var(--border); border-radius: 7px; padding: 12px; font-size: 13px; line-height: 1.6; white-space: pre-wrap; margin-bottom: 14px; max-height: 200px; overflow-y: auto; color: var(--text2); }
   .approval-card { background: rgba(147,51,234,0.04); border: 1px solid rgba(147,51,234,0.15); border-radius: 10px; padding: 18px; margin-bottom: 16px; }
   .approval-card-title { font-size: 14px; font-weight: 700; color: var(--purple); margin-bottom: 10px; }
-
-  .toast { position: fixed; bottom: 20px; right: 20px; background: var(--sidebar); color: #fff; border-radius: 8px; padding: 11px 16px; font-size: 13px; z-index: 9999; animation: slideIn 0.25s ease; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.2); }
-  @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+  .toast { position: fixed; bottom: 20px; right: 20px; background: var(--sidebar); color: #fff; border-radius: 8px; padding: 11px 16px; font-size: 13px; z-index: 9999; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.2); }
 </style>
 </head>
 <body>
-
 <nav class="sidebar">
   <div class="logo">
     <div class="logo-title">Panda <span>Bear</span> Agent</div>
     <div class="logo-sub">Koronet · HR Onboarding</div>
   </div>
   <div class="nav">
-    <div class="nav-item active" onclick="setPage('dashboard', this)"><span class="nav-icon">📊</span> Dashboard</div>
-    <div class="nav-item" onclick="setPage('messages', this)"><span class="nav-icon">💬</span> Messages</div>
-    <div class="nav-item" onclick="setPage('runs', this)"><span class="nav-icon">⚡</span> Runs</div>
-    <div class="nav-item" onclick="setPage('hires', this)"><span class="nav-icon">👤</span> Upcoming Hires</div>
+    <div class="nav-item active" onclick="setPage('dashboard', this)"><span>📊</span> Dashboard</div>
+    <div class="nav-item" onclick="setPage('messages', this)"><span>💬</span> Messages</div>
+    <div class="nav-item" onclick="setPage('runs', this)"><span>⚡</span> Runs</div>
+    <div class="nav-item" onclick="setPage('hires', this)"><span>👤</span> Upcoming Hires</div>
   </div>
   <div class="sidebar-footer">
     <div style="font-weight:600;color:#ccc;margin-bottom:2px">Juni Osorio</div>
@@ -325,38 +95,17 @@
     <div>junior@koronet.com</div>
   </div>
 </nav>
-
 <main class="main">
-  <div class="config-banner">
-    <span style="color:var(--teal)">🔗</span>
-    <span style="color:var(--text3);white-space:nowrap;font-size:12px">API URL:</span>
-    <input type="text" id="api-url" placeholder="https://panda-bear-agent.onrender.com" />
-    <button class="btn-primary" onclick="saveConfig()" style="white-space:nowrap;padding:7px 14px;font-size:12px">Connect</button>
-  </div>
-  <div id="page-content"></div>
+  <div id="page-content"><div class="loading"><span class="spinner"></span> Conectando...</div></div>
 </main>
-
 <div class="toast" id="toast" style="display:none"></div>
 <div class="modal-overlay" id="modal" style="display:none" onclick="closeModal(event)">
   <div class="modal" id="modal-content"></div>
 </div>
-
 <script>
-let API_URL = '';
+const BASE_URL = window.location.origin;
 let currentPage = 'dashboard';
 let toastTimer = null;
-
-document.getElementById('api-url').value = window.location.origin;
-
-function saveConfig() {
-  const val = document.getElementById('api-url').value.trim().replace(/\/$/, '');
-  if (val) {
-    API_URL = val;
-    localStorage.setItem('panda_api_url', val);
-    showToast('✅ Connected!');
-    loadPage(currentPage);
-  }
-}
 
 function showToast(msg, d=3000) {
   const t = document.getElementById('toast');
@@ -366,10 +115,8 @@ function showToast(msg, d=3000) {
 }
 
 async function apiFetch(path, options={}) {
-  if (!API_URL) throw new Error('No API URL');
-  const res = await fetch(API_URL + '/api' + path, {
+  const res = await fetch(BASE_URL + '/api' + path, {
     headers: {'Content-Type': 'application/json'},
-    credentials: 'include',
     ...options
   });
   if (!res.ok) throw new Error('HTTP ' + res.status);
@@ -388,6 +135,12 @@ function loadPage(page) {
   ({ dashboard: renderDashboard, messages: renderMessages, runs: renderRuns, hires: renderHires }[page] || renderDashboard)();
 }
 
+const BADGES = { sent: '✓ Sent', pending: '⏳ Pending', pending_approval: '👁 Awaiting', failed: '✗ Failed', skipped: '⏭ Skipped', rejected: '✗ Rejected' };
+const TYPE_LABEL = { employee_email: '📧 Correo Empleado', manager_slack: '💬 Slack Manager', bienvenidas_slack: '🎉 #Koronet' };
+
+function badge(s) { return `<span class="badge ${s}">${BADGES[s] || s}</span>`; }
+function esc(s) { return (s || '').replace(/`/g, '\\`').replace(/\$/g, '\\$'); }
+
 async function renderDashboard() {
   const c = document.getElementById('page-content');
   try {
@@ -398,20 +151,17 @@ async function renderDashboard() {
     ]);
     const pending = batches.filter(b => b.status === 'pending_approval');
     c.innerHTML = `
-      <div class="page-header">
-        <div class="page-title">Dashboard</div>
-        <div class="page-sub">Panda Bear Agent · Koronet Onboarding</div>
-      </div>
+      <div class="page-header"><div class="page-title">Dashboard</div><div class="page-sub">Panda Bear Agent · Koronet Onboarding</div></div>
       <div class="integrations-row">
-        ${renderInt('BambooHR', integrations.bamboohr)}
-        ${renderInt('Slack', integrations.slack)}
-        ${renderInt('Groq AI', integrations.anthropic)}
+        <div class="int-pill"><div class="dot ${integrations.bamboohr?.connected ? 'green':'red'}"></div>BambooHR <span style="color:var(--text3)">${integrations.bamboohr?.detail||''}</span></div>
+        <div class="int-pill"><div class="dot ${integrations.slack?.connected ? 'green':'red'}"></div>Slack <span style="color:var(--text3)">${integrations.slack?.detail||''}</span></div>
+        <div class="int-pill"><div class="dot ${integrations.anthropic?.connected ? 'green':'red'}"></div>Groq AI <span style="color:var(--text3)">${integrations.anthropic?.detail||''}</span></div>
       </div>
       <div class="stats-grid">
         <div class="stat-card"><div class="stat-label">Messages Sent</div><div class="stat-value">${stats.totalMessagesSent}</div></div>
         <div class="stat-card"><div class="stat-label">Employees Tracked</div><div class="stat-value">${stats.totalEmployeesTracked}</div></div>
         <div class="stat-card"><div class="stat-label">Total Runs</div><div class="stat-value">${stats.totalRuns}</div></div>
-        <div class="stat-card"><div class="stat-label">Failed</div><div class="stat-value" style="color:${stats.totalMessagesFailed > 0 ? 'var(--red)' : 'var(--text)'}">${stats.totalMessagesFailed}</div></div>
+        <div class="stat-card"><div class="stat-label">Failed</div><div class="stat-value" style="color:${stats.totalMessagesFailed>0?'var(--red)':'var(--text)'}">${stats.totalMessagesFailed}</div></div>
       </div>
       <div class="btn-row">
         <button class="btn-primary" id="sync-btn" onclick="runSync(false)">▶ Run Sync Now</button>
@@ -421,270 +171,222 @@ async function renderDashboard() {
       ${pending.map(b => `
         <div class="approval-card">
           <div class="approval-card-title">⏳ Pendiente — ${b.employeeName || 'Batch #'+b.id} · ${b.messageCount} mensaje(s)</div>
-          <div style="font-size:13px;color:var(--text2);margin-bottom:12px">Waiting for your approval before sending.</div>
+          <div style="font-size:13px;color:var(--text2);margin-bottom:12px">Esperando tu aprobación antes de enviar.</div>
           <div style="display:flex;gap:8px">
-            <button class="act-btn approve" onclick="approveBatch(${b.id})">✅ Approve & Send</button>
-            <button class="act-btn reject" onclick="rejectBatch(${b.id})">❌ Reject</button>
-            <button class="act-btn" onclick="reviewBatch(${b.id})">👁 Review Messages</button>
+            <button class="act-btn approve" onclick="approveBatch(${b.id})">✅ Aprobar & Enviar</button>
+            <button class="act-btn reject" onclick="rejectBatch(${b.id})">❌ Rechazar</button>
+            <button class="act-btn" onclick="reviewBatch(${b.id})">👁 Revisar Mensajes</button>
           </div>
         </div>`).join('')}
       <div class="section">
-        <div class="section-header">
-          <div class="section-title">Recent Messages</div>
-          <span class="section-sub" onclick="setPage('messages', document.querySelectorAll('.nav-item')[1])">View all →</span>
-        </div>
+        <div class="section-header"><div class="section-title">Mensajes Recientes</div></div>
         ${stats.recentMessages.length === 0
-          ? '<div class="empty"><div class="icon">📭</div>No messages yet. Run a sync to get started.</div>'
-          : `<table class="table"><thead><tr><th>Employee</th><th>Manager</th><th>Status</th><th>Date</th><th>Actions</th></tr></thead><tbody>
-            ${stats.recentMessages.slice(0, 5).map(m => msgRow(m)).join('')}
+          ? '<div class="empty"><div class="icon">📭</div>No hay mensajes. Corre un sync para empezar.</div>'
+          : `<table class="table"><thead><tr><th>Empleado</th><th>Tipo</th><th>Manager</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody>
+            ${stats.recentMessages.slice(0,5).map(m => `<tr>
+              <td><div style="font-weight:600">${m.employeeName}</div><div style="font-size:11px;color:var(--text3)">${m.employeeJobTitle||''}</div></td>
+              <td style="font-size:12px;color:var(--teal)">${TYPE_LABEL[m.messageType]||m.messageType}</td>
+              <td style="color:var(--text2)">${m.managerName||'—'}</td>
+              <td>${badge(m.status)}</td>
+              <td style="color:var(--text3);font-size:12px">${new Date(m.createdAt).toLocaleDateString()}</td>
+              <td>
+                ${m.status==='pending_approval'?`<button class="act-btn" onclick="openEdit(${m.id},\`${esc(m.messageContent)}\`,'${m.employeeName}')">✏️</button>`:''}
+                ${m.status==='pending_approval'?`<button class="act-btn" onclick="testDm(${m.id})">🔔</button>`:''}
+                ${m.status==='pending_approval'?`<button class="act-btn" onclick="skipMsg(${m.id})">⏭</button>`:''}
+              </td></tr>`).join('')}
           </tbody></table>`}
       </div>`;
   } catch(e) {
     c.innerHTML = `<div class="page-header"><div class="page-title">Dashboard</div></div>
-      <div class="section"><div class="empty"><div class="icon">⚠️</div>
-      Could not connect to API.<br>Make sure <strong>agent.py</strong> is running and the URL is correct.</div></div>`;
+      <div class="section"><div class="empty"><div class="icon">⚠️</div>No se pudo conectar a la API.<br><small>${e.message}</small></div></div>`;
   }
 }
-
-function renderInt(name, s) {
-  return `<div class="int-pill"><div class="dot ${s?.connected ? 'green' : 'red'}"></div><span>${name}</span>${s?.detail ? `<span style="color:var(--text3);font-weight:400">${s.detail}</span>` : ''}</div>`;
-}
-
-function msgRow(m) {
-  return `<tr>
-    <td><div style="font-weight:600">${m.employeeName}</div><div style="font-size:11px;color:var(--text3)">${m.employeeJobTitle || ''}</div></td>
-    <td style="color:var(--text2)">${m.managerName || '—'}</td>
-    <td>${badge(m.status)}</td>
-    <td style="color:var(--text3);font-size:12px;font-family:'JetBrains Mono',monospace">${new Date(m.createdAt).toLocaleDateString()}</td>
-    <td>
-      ${m.status === 'pending_approval' ? `<button class="act-btn" onclick="openEdit(${m.id},\`${esc(m.messageContent)}\`,'${m.employeeName}')">✏️</button>` : ''}
-      ${m.status === 'pending_approval' ? `<button class="act-btn" onclick="testDm(${m.id})">🔔</button>` : ''}
-      ${m.status === 'pending_approval' ? `<button class="act-btn" onclick="skipMsg(${m.id})">⏭</button>` : ''}
-      ${m.status === 'sent' ? `<button class="act-btn" onclick="resend(${m.id})">↺</button>` : ''}
-    </td></tr>`;
-}
-
-const BADGES = { sent: '✓ Sent', pending: '⏳ Pending', pending_approval: '👁 Awaiting', failed: '✗ Failed', skipped: '⏭ Skipped', rejected: '✗ Rejected' };
-function badge(s) { return `<span class="badge ${s}">${BADGES[s] || s}</span>`; }
-function esc(s) { return (s || '').replace(/`/g, '\`').replace(/\$/g, '\$'); }
 
 async function renderMessages() {
   const c = document.getElementById('page-content');
   try {
     const msgs = await apiFetch('/agent/messages');
-    c.innerHTML = `<div class="page-header"><div class="page-title">Messages</div><div class="page-sub">All onboarding messages</div></div>
+    c.innerHTML = `<div class="page-header"><div class="page-title">Mensajes</div></div>
       <div class="section">
-        <div class="section-header"><div class="section-title">All Messages <span style="color:var(--text3);font-weight:400">(${msgs.length})</span></div></div>
-        ${msgs.length === 0 ? '<div class="empty"><div class="icon">📭</div>No messages yet.</div>'
-          : `<table class="table"><thead><tr><th>Employee</th><th>Job Title</th><th>Manager</th><th>Status</th><th>Hire Date</th><th>Actions</th></tr></thead><tbody>
-          ${msgs.map(m => `<tr>
+        <div class="section-header"><div class="section-title">Todos los mensajes (${msgs.length})</div></div>
+        ${msgs.length===0?'<div class="empty"><div class="icon">📭</div>No hay mensajes.</div>'
+          :`<table class="table"><thead><tr><th>Empleado</th><th>Tipo</th><th>Manager</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody>
+          ${msgs.map(m=>`<tr>
             <td style="font-weight:600">${m.employeeName}</td>
-            <td style="color:var(--text2)">${m.employeeJobTitle || '—'}</td>
-            <td style="color:var(--text2)">${m.managerName || '—'}</td>
+            <td style="font-size:12px;color:var(--teal)">${TYPE_LABEL[m.messageType]||m.messageType}</td>
+            <td style="color:var(--text2)">${m.managerName||'—'}</td>
             <td>${badge(m.status)}</td>
-            <td style="color:var(--text3);font-size:12px;font-family:'JetBrains Mono',monospace">${m.employeeHireDate || '—'}</td>
+            <td style="color:var(--text3);font-size:12px">${new Date(m.createdAt).toLocaleDateString()}</td>
             <td>
               <button class="act-btn" onclick="viewMsg(${m.id},\`${esc(m.messageContent)}\`,'${m.employeeName}','${m.status}')">👁</button>
-              ${m.status === 'pending_approval' ? `<button class="act-btn" onclick="openEdit(${m.id},\`${esc(m.messageContent)}\`,'${m.employeeName}')">✏️</button>` : ''}
-              ${m.status === 'pending_approval' ? `<button class="act-btn" onclick="testDm(${m.id})">🔔</button>` : ''}
-              ${m.status === 'pending_approval' ? `<button class="act-btn" onclick="skipMsg(${m.id})">⏭</button>` : ''}
-              ${m.status === 'sent' ? `<button class="act-btn" onclick="resend(${m.id})">↺</button>` : ''}
+              ${m.status==='pending_approval'?`<button class="act-btn" onclick="openEdit(${m.id},\`${esc(m.messageContent)}\`,'${m.employeeName}')">✏️</button>`:''}
+              ${m.status==='pending_approval'?`<button class="act-btn" onclick="testDm(${m.id})">🔔</button>`:''}
+              ${m.status==='pending_approval'?`<button class="act-btn" onclick="skipMsg(${m.id})">⏭</button>`:''}
             </td></tr>`).join('')}
           </tbody></table>`}
       </div>`;
-  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Could not load messages.</div></div>`; }
+  } catch(e) { c.innerHTML=`<div class="section"><div class="empty">⚠️ Error cargando mensajes.</div></div>`; }
 }
 
 async function renderRuns() {
   const c = document.getElementById('page-content');
   try {
     const runs = await apiFetch('/agent/runs');
-    c.innerHTML = `<div class="page-header"><div class="page-title">Runs</div><div class="page-sub">History of all sync executions</div></div>
+    c.innerHTML = `<div class="page-header"><div class="page-title">Runs</div></div>
       <div class="section">
-        <div class="section-header"><div class="section-title">Run History <span style="color:var(--text3);font-weight:400">(${runs.length})</span></div></div>
-        ${runs.length === 0 ? '<div class="empty"><div class="icon">⚡</div>No runs yet.</div>'
-          : `<table class="table"><thead><tr><th>ID</th><th>Started</th><th>Status</th><th>Scanned</th><th>New</th><th>Sent</th><th>Failed</th><th>Type</th></tr></thead><tbody>
-          ${runs.map(r => `<tr>
+        <div class="section-header"><div class="section-title">Historial (${runs.length})</div></div>
+        ${runs.length===0?'<div class="empty"><div class="icon">⚡</div>No hay runs.</div>'
+          :`<table class="table"><thead><tr><th>ID</th><th>Inicio</th><th>Estado</th><th>Escaneados</th><th>Nuevos</th><th>Mensajes</th><th>Tipo</th></tr></thead><tbody>
+          ${runs.map(r=>`<tr>
             <td style="font-family:'JetBrains Mono',monospace;color:var(--text3)">#${r.id}</td>
-            <td style="font-size:12px;color:var(--text2)">${new Date(r.startedAt).toLocaleString()}</td>
-            <td><span class="badge ${r.status === 'completed' ? 'sent' : r.status === 'failed' ? 'failed' : 'pending'}">${r.status}</span></td>
+            <td style="font-size:12px">${new Date(r.startedAt).toLocaleString()}</td>
+            <td><span class="badge ${r.status==='completed'?'sent':r.status==='failed'?'failed':'pending'}">${r.status}</span></td>
             <td style="text-align:center">${r.employeesScanned}</td>
             <td style="text-align:center;color:var(--teal)">${r.newEmployees}</td>
             <td style="text-align:center;color:var(--green)">${r.messagesSent}</td>
-            <td style="text-align:center;color:${r.messagesFailed > 0 ? 'var(--red)' : 'var(--text3)'}">${r.messagesFailed}</td>
-            <td><span class="badge ${r.dryRun ? 'skipped' : 'sent'}">${r.dryRun ? '🔍 Dry' : '🚀 Live'}</span></td>
+            <td><span class="badge ${r.dryRun?'skipped':'sent'}">${r.dryRun?'🔍 Dry':'🚀 Live'}</span></td>
           </tr>`).join('')}
           </tbody></table>`}
       </div>`;
-  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Could not load runs.</div></div>`; }
+  } catch(e) { c.innerHTML=`<div class="section"><div class="empty">⚠️ Error.</div></div>`; }
 }
 
 async function renderHires() {
   const c = document.getElementById('page-content');
   try {
     const hires = await apiFetch('/agent/recent-hires');
-    c.innerHTML = `<div class="page-header"><div class="page-title">Upcoming Hires</div><div class="page-sub">Employees with future start dates from BambooHR</div></div>
+    c.innerHTML = `<div class="page-header"><div class="page-title">Próximos Ingresos</div></div>
       <div class="section">
-        <div class="section-header"><div class="section-title">Upcoming <span style="color:var(--text3);font-weight:400">(${hires.length})</span></div></div>
-        ${hires.length === 0 ? '<div class="empty"><div class="icon">🎉</div>No upcoming hires in the next 60 days.</div>'
-          : `<table class="table"><thead><tr><th>Employee</th><th>Job Title</th><th>Department</th><th>Start Date</th><th>Manager</th><th>Location</th><th>Status</th></tr></thead><tbody>
-          ${hires.map(h => `<tr>
-            <td><div style="font-weight:600">${h.firstName} ${h.lastName}</div><div style="font-size:11px;color:var(--text3)">${h.workEmail || ''}</div></td>
-            <td style="color:var(--text2)">${h.jobTitle || '—'}</td>
-            <td style="color:var(--text3)">${h.department || '—'}</td>
-            <td style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--teal)">${h.hireDate || '—'}</td>
-            <td style="color:var(--text2)">${h.supervisor || '—'}</td>
-            <td style="color:var(--text3)">${h.location || '—'}</td>
-            <td><span class="badge ${h.alreadyProcessed ? 'sent' : 'pending'}">${h.alreadyProcessed ? '✓ Done' : '⏳ Pending'}</span></td>
+        <div class="section-header"><div class="section-title">Próximos 60 días (${hires.length})</div></div>
+        ${hires.length===0?'<div class="empty"><div class="icon">🎉</div>No hay ingresos próximos.</div>'
+          :`<table class="table"><thead><tr><th>Empleado</th><th>Cargo</th><th>Fecha Inicio</th><th>Manager</th><th>País</th><th>Idioma</th><th>Estado</th></tr></thead><tbody>
+          ${hires.map(h=>`<tr>
+            <td><div style="font-weight:600">${h.firstName} ${h.lastName}</div><div style="font-size:11px;color:var(--text3)">${h.workEmail||''}</div></td>
+            <td style="color:var(--text2)">${h.jobTitle||'—'}</td>
+            <td style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--teal)">${h.hireDate||'—'}</td>
+            <td style="color:var(--text2)">${h.supervisor||'—'}</td>
+            <td style="color:var(--text3)">${h.location||'—'}</td>
+            <td><span class="badge ${h.language==='es'?'sent':'pending'}">${h.language==='es'?'🇪🇸 ES':'🇬🇧 EN'}</span></td>
+            <td><span class="badge ${h.alreadyProcessed?'sent':'pending'}">${h.alreadyProcessed?'✓ Listo':'⏳ Pendiente'}</span></td>
           </tr>`).join('')}
           </tbody></table>`}
       </div>`;
-  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Could not load hires.</div></div>`; }
+  } catch(e) { c.innerHTML=`<div class="section"><div class="empty">⚠️ Error.</div></div>`; }
 }
 
-async function resetDB() {
-  if (!confirm('¿Seguro que quieres borrar todos los datos? Esta acción no se puede deshacer.')) return;
+async function runSync(dry) {
+  const btn = document.getElementById(dry?'dry-btn':'sync-btn');
+  if (btn) { btn.disabled=true; btn.innerHTML='<span class="spinner"></span> Running...'; }
   try {
-    await apiFetch('/agent/reset', { method: 'POST' });
-    showToast('✅ Base de datos limpiada!', 4000);
-    renderDashboard();
-  } catch(e) { showToast('❌ Error al limpiar.'); }
-}
-  const btn = document.getElementById(dry ? 'dry-btn' : 'sync-btn');
-  if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Running...'; }
-  try {
-    const r = await apiFetch('/agent/sync', { method: 'POST', body: JSON.stringify({ dryRun: dry, lookbackDays: 60 }) });
-    showToast(`✅ Done! ${r.newEmployees} new hire(s), ${r.messagesSent} queued.`, 5000);
+    const r = await apiFetch('/agent/sync', {method:'POST', body:JSON.stringify({dryRun:dry, lookbackDays:60})});
+    showToast(`✅ Listo! ${r.newEmployees} nuevo(s), ${r.messagesSent} mensajes.`, 5000);
     setTimeout(() => renderDashboard(), 800);
   } catch(e) {
     showToast('❌ Sync failed.', 4000);
-    if (btn) { btn.disabled = false; btn.innerHTML = dry ? '🔍 Dry Run' : '▶ Run Sync Now'; }
+    if (btn) { btn.disabled=false; btn.innerHTML=dry?'🔍 Dry Run':'▶ Run Sync Now'; }
   }
 }
 
+async function resetDB() {
+  if (!confirm('¿Seguro que quieres borrar todos los datos?')) return;
+  try {
+    await apiFetch('/agent/reset', {method:'POST'});
+    showToast('✅ Base de datos limpiada!', 4000);
+    renderDashboard();
+  } catch(e) { showToast('❌ Error.'); }
+}
+
 async function approveBatch(id) {
-  try { await apiFetch(`/agent/batches/${id}/approve`, { method: 'POST' }); showToast('✅ Approved!', 4000); renderDashboard(); }
-  catch(e) { showToast('❌ Could not approve.'); }
+  try { await apiFetch(`/agent/batches/${id}/approve`, {method:'POST'}); showToast('✅ Aprobado!'); renderDashboard(); }
+  catch(e) { showToast('❌ Error.'); }
 }
 
 async function rejectBatch(id) {
-  try { await apiFetch(`/agent/batches/${id}/reject`, { method: 'POST' }); showToast('🚫 Rejected.', 4000); renderDashboard(); }
-  catch(e) { showToast('❌ Could not reject.'); }
+  try { await apiFetch(`/agent/batches/${id}/reject`, {method:'POST'}); showToast('🚫 Rechazado.'); renderDashboard(); }
+  catch(e) { showToast('❌ Error.'); }
 }
 
 async function reviewBatch(id) {
   try {
     const batch = await apiFetch(`/agent/batches/${id}`);
     const m = document.getElementById('modal-content');
-
-    const typeLabel = {
-      'employee_email': '📧 Correo al Empleado',
-      'manager_slack':  '💬 Slack al Manager',
-      'bienvenidas_slack': '🎉 #Koronet Bienvenidas'
-    };
-
-    const msgHtml = batch.messages && batch.messages.length > 0
-      ? batch.messages.map(msg => `
-        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px;">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
-            <div>
-              <span style="font-weight:700;font-size:14px">${msg.employeeName}</span>
-              <span style="color:var(--text3);font-size:12px;margin-left:8px">${msg.employeeJobTitle || ''}</span>
-            </div>
-            <div style="display:flex;gap:6px;align-items:center">
-              <span style="font-size:12px;color:var(--teal);font-weight:600">${typeLabel[msg.messageType] || msg.messageType}</span>
-              ${badge(msg.status)}
-            </div>
+    const msgs = batch.messages || [];
+    m.innerHTML = `<div class="modal-title">👁 ${batch.employeeName || 'Batch #'+id} — ${msgs.length} mensaje(s)</div>
+      ${msgs.length===0?'<div class="empty"><div class="icon">📭</div>No hay mensajes.</div>'
+        :msgs.map(msg=>`
+        <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+            <span style="font-weight:700">${msg.employeeName}</span>
+            <span style="font-size:12px;color:var(--teal);font-weight:600">${TYPE_LABEL[msg.messageType]||msg.messageType}</span>
           </div>
-          <div class="msg-preview" style="margin-bottom:10px;max-height:200px;overflow-y:auto;">${(msg.messageContent || '').replace(/\n/g, '<br>')}</div>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;">
-            <button class="act-btn approve" onclick="approveOne(${msg.id})">✅ Aprobar</button>
+          <div class="msg-preview">${(msg.messageContent||'').replace(/\n/g,'<br>')}</div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
             <button class="act-btn" onclick="openEdit(${msg.id},\`${esc(msg.messageContent)}\`,'${msg.employeeName}')">✏️ Editar</button>
             <button class="act-btn" onclick="testDm(${msg.id})">🔔 Test DM</button>
-            <button class="act-btn reject" onclick="skipMsg(${msg.id})">⏭ Saltar</button>
+            <button class="act-btn" onclick="skipMsg(${msg.id})">⏭ Saltar</button>
           </div>
-        </div>`).join('')
-      : '<div class="empty"><div class="icon">📭</div>No hay mensajes en este batch.</div>';
-
-    m.innerHTML = `
-      <div class="modal-title">👁 Review Batch #${id} — ${batch.messages ? batch.messages.length : 0} mensaje(s)</div>
-      ${msgHtml}
-      <div class="modal-actions" style="margin-top:8px;">
+        </div>`).join('')}
+      <div class="modal-actions">
         <button class="btn-secondary" style="padding:8px 16px;font-size:13px" onclick="closeModal()">Cerrar</button>
-        <button class="btn-primary" style="padding:8px 16px;font-size:13px" onclick="approveBatch(${id});closeModal()">✅ Aprobar Todos</button>
+        <button class="btn-primary" style="padding:8px 16px;font-size:13px" onclick="approveBatch(${id});closeModal()">✅ Aprobar Todo</button>
       </div>`;
-    document.getElementById('modal').style.display = 'flex';
-  } catch(e) {
-    console.error(e);
-    showToast('❌ Could not load batch: ' + e.message);
-  }
-}
-
-async function approveOne(msgId) {
-  try {
-    await apiFetch(`/agent/messages/${msgId}/resend`, { method: 'POST' });
-    showToast('✅ Mensaje aprobado!');
-    loadPage(currentPage);
-    closeModal();
-  } catch(e) { showToast('❌ Error al aprobar.'); }
+    document.getElementById('modal').style.display='flex';
+  } catch(e) { showToast('❌ Error cargando batch.'); }
 }
 
 function openEdit(id, content, name) {
   const m = document.getElementById('modal-content');
-  m.innerHTML = `<div class="modal-title">✏️ Edit — ${name}</div>
-    <div style="margin-bottom:8px;font-size:12px;color:var(--text3)">Current message:</div>
-    <div class="msg-preview">${content}</div>
-    <div style="margin-bottom:8px;font-size:12px;color:var(--text3)">Edit directly:</div>
-    <textarea id="edit-content">${content}</textarea>
-    <div style="margin-bottom:8px;font-size:12px;color:var(--text3)">Or give AI feedback:</div>
-    <textarea id="edit-feedback" style="min-height:70px" placeholder="e.g. 'Make it shorter and more casual'"></textarea>
+  m.innerHTML = `<div class="modal-title">✏️ Editar — ${name}</div>
+    <div style="margin-bottom:8px;font-size:12px;color:var(--text3)">Mensaje actual:</div>
+    <div class="msg-preview">${(content||'').replace(/\n/g,'<br>')}</div>
+    <div style="margin-bottom:8px;font-size:12px;color:var(--text3)">Editar directamente:</div>
+    <textarea id="edit-content">${content||''}</textarea>
+    <div style="margin-bottom:8px;font-size:12px;color:var(--text3)">O dar feedback a la IA:</div>
+    <textarea id="edit-feedback" style="min-height:70px" placeholder="Ej: hazlo más corto y casual"></textarea>
     <div class="modal-actions">
-      <button class="btn-secondary" style="padding:8px 16px;font-size:13px" onclick="closeModal()">Cancel</button>
-      <button class="btn-primary" style="padding:8px 16px;font-size:13px" onclick="submitEdit(${id})">Save</button>
+      <button class="btn-secondary" style="padding:8px 16px;font-size:13px" onclick="closeModal()">Cancelar</button>
+      <button class="btn-primary" style="padding:8px 16px;font-size:13px" onclick="submitEdit(${id})">Guardar</button>
     </div>`;
-  document.getElementById('modal').style.display = 'flex';
+  document.getElementById('modal').style.display='flex';
 }
 
 async function submitEdit(id) {
   const content = document.getElementById('edit-content').value;
   const feedback = document.getElementById('edit-feedback').value;
-  const body = feedback.trim() ? { feedback } : { content };
+  const body = feedback.trim() ? {feedback} : {content};
   try {
-    await apiFetch(`/agent/messages/${id}/edit`, { method: 'POST', body: JSON.stringify(body) });
-    showToast('✅ Updated!'); closeModal(); loadPage(currentPage);
-  } catch(e) { showToast('❌ Could not save.'); }
+    await apiFetch(`/agent/messages/${id}/edit`, {method:'POST', body:JSON.stringify(body)});
+    showToast('✅ Actualizado!'); closeModal(); loadPage(currentPage);
+  } catch(e) { showToast('❌ Error.'); }
 }
 
 async function testDm(id) {
-  showToast('🔔 Sending test DM...', 2000);
+  showToast('🔔 Enviando test DM...', 2000);
   try {
-    const r = await apiFetch(`/agent/messages/${id}/test-dm`, { method: 'POST' });
-    showToast(r.delivered ? '✅ Test DM sent!' : '❌ Failed: ' + r.error, 4000);
+    const r = await apiFetch(`/agent/messages/${id}/test-dm`, {method:'POST'});
+    showToast(r.delivered?'✅ Test DM enviado!':'❌ '+r.error, 4000);
   } catch(e) { showToast('❌ Error.'); }
 }
 
 async function skipMsg(id) {
-  try { await apiFetch(`/agent/messages/${id}/skip`, { method: 'POST' }); showToast('⏭ Skipped.'); loadPage(currentPage); }
-  catch(e) { showToast('❌ Could not skip.'); }
-}
-
-async function resend(id) {
-  try { await apiFetch(`/agent/messages/${id}/resend`, { method: 'POST' }); showToast('✅ Resent!'); loadPage(currentPage); }
-  catch(e) { showToast('❌ Could not resend.'); }
+  try { await apiFetch(`/agent/messages/${id}/skip`, {method:'POST'}); showToast('⏭ Saltado.'); loadPage(currentPage); }
+  catch(e) { showToast('❌ Error.'); }
 }
 
 function viewMsg(id, content, name, status) {
   const m = document.getElementById('modal-content');
-  m.innerHTML = `<div class="modal-title">💬 ${name}</div><div style="margin-bottom:10px">${badge(status)}</div><div class="msg-preview">${content}</div>
-    <div class="modal-actions"><button class="btn-secondary" style="padding:8px 16px;font-size:13px" onclick="closeModal()">Close</button></div>`;
-  document.getElementById('modal').style.display = 'flex';
+  m.innerHTML = `<div class="modal-title">💬 ${name}</div><div style="margin-bottom:10px">${badge(status)}</div>
+    <div class="msg-preview">${(content||'').replace(/\n/g,'<br>')}</div>
+    <div class="modal-actions"><button class="btn-secondary" style="padding:8px 16px;font-size:13px" onclick="closeModal()">Cerrar</button></div>`;
+  document.getElementById('modal').style.display='flex';
 }
 
 function closeModal(e) {
-  if (!e || e.target === document.getElementById('modal'))
-    document.getElementById('modal').style.display = 'none';
+  if (!e || e.target===document.getElementById('modal'))
+    document.getElementById('modal').style.display='none';
 }
 
+// Cargar dashboard al iniciar
 loadPage('dashboard');
 </script>
 </body>
