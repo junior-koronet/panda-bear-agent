@@ -874,8 +874,15 @@ def test_dm(msg_id: int, user: str = Depends(verify_credentials)):
         return {"delivered": False, "error": str(e)}
 
 
-@app.post("/api/agent/sync")
-def sync(body: SyncRequest, user: str = Depends(verify_credentials)):
+@app.post("/api/agent/reset")
+def reset_db(user: str = Depends(verify_credentials)):
+    conn = get_db()
+    conn.execute("DELETE FROM messages")
+    conn.execute("DELETE FROM batches")
+    conn.execute("DELETE FROM runs")
+    conn.commit()
+    conn.close()
+    return {"reset": True}
     result = run_sync(dry_run=body.dryRun, lookback_days=body.lookbackDays)
     return result
 

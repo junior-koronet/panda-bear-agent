@@ -414,6 +414,7 @@ async function renderDashboard() {
       <div class="btn-row">
         <button class="btn-primary" id="sync-btn" onclick="runSync(false)">▶ Run Sync Now</button>
         <button class="btn-secondary" id="dry-btn" onclick="runSync(true)">🔍 Dry Run</button>
+        <button class="btn-secondary" onclick="resetDB()" style="border-color:#dc2626;color:#dc2626">🗑 Reset DB</button>
       </div>
       ${pending.map(b => `
         <div class="approval-card">
@@ -539,7 +540,14 @@ async function renderHires() {
   } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Could not load hires.</div></div>`; }
 }
 
-async function runSync(dry) {
+async function resetDB() {
+  if (!confirm('¿Seguro que quieres borrar todos los datos? Esta acción no se puede deshacer.')) return;
+  try {
+    await apiFetch('/agent/reset', { method: 'POST' });
+    showToast('✅ Base de datos limpiada!', 4000);
+    renderDashboard();
+  } catch(e) { showToast('❌ Error al limpiar.'); }
+}
   const btn = document.getElementById(dry ? 'dry-btn' : 'sync-btn');
   if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner"></span> Running...'; }
   try {
