@@ -17,10 +17,12 @@ from dotenv import load_dotenv
 from PIL import Image, ImageDraw, ImageFont
 import numpy as np
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.security import HTTPBasic, HTTPBasicCredentials
 from fastapi.staticfiles import StaticFiles
+import secrets
 from pydantic import BaseModel
 
 from groq import Groq
@@ -638,8 +640,24 @@ def notify_approver(batch_id: int, new_employees: list):
 app = FastAPI(title="Panda Bear Agent API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
+security = HTTPBasic()
+
+DASHBOARD_USER     = os.getenv("DASHBOARD_USER", "junior@koronet.com")
+DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "koronet2024")
+
+def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
+    correct_user = secrets.compare_digest(credentials.username, DASHBOARD_USER)
+    correct_pass = secrets.compare_digest(credentials.password, DASHBOARD_PASSWORD)
+    if not (correct_user and correct_pass):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Credenciales incorrectas",
+            headers={"WWW-Authenticate": "Basic"},
+        )
+    return credentials.username
+
 @app.get("/")
-def serve_dashboard():
+def serve_dashboard(user: str = Depends(verify_credentials)):
     dashboard_path = os.path.join(BASE_DIR, "panda-bear-agent-v3.html")
     if os.path.exists(dashboard_path):
         return FileResponse(dashboard_path)
@@ -657,7 +675,7 @@ class EditRequest(BaseModel):
 
 
 @app.get("/api/agent/stats")
-def get_stats():
+def get_stats(user: str = Depends(verify_credentials)):
     conn = get_db()
     c = conn.cursor()
     total_sent   = c.execute("SELECT COUNT(*) FROM messages WHERE status='sent'").fetchone()[0]
@@ -694,7 +712,7 @@ def get_integrations():
 
 
 @app.get("/api/agent/messages")
-def get_messages():
+def get_messages(user: str = Depends(verify_credentials)):
     conn = get_db()
     msgs = conn.execute("SELECT * FROM messages ORDER BY createdAt DESC").fetchall()
     conn.close()
@@ -702,7 +720,7 @@ def get_messages():
 
 
 @app.get("/api/agent/runs")
-def get_runs():
+def get_runs(user: str = Depends(verify_credentials)):
     conn = get_db()
     runs = conn.execute("SELECT * FROM runs ORDER BY startedAt DESC").fetchall()
     conn.close()
@@ -710,7 +728,7 @@ def get_runs():
 
 
 @app.get("/api/agent/batches")
-def get_batches():
+def get_batches(user: str = Depends(verify_credentials)):
     conn = get_db()
     batches = conn.execute(
         "SELECT * FROM batches WHERE status='pending_approval' ORDER BY createdAt DESC"
@@ -731,7 +749,7 @@ def get_batch(batch_id: int):
 
 
 @app.post("/api/agent/batches/{batch_id}/approve")
-def approve_batch(batch_id: int):
+def approve_batch(batch_id: int, user: str = Depends(verify_credentials)):
     conn = get_db()
     c = conn.cursor()
     msgs = c.execute(
@@ -753,7 +771,7 @@ def approve_batch(batch_id: int):
 
 
 @app.post("/api/agent/batches/{batch_id}/reject")
-def reject_batch(batch_id: int):
+def reject_batch(batch_id: int, user: str = Depends(verify_credentials)):
     conn = get_db()
     conn.execute("UPDATE batches SET status='rejected', rejectedAt=? WHERE id=?",
                  (datetime.now().isoformat(), batch_id))
@@ -788,7 +806,7 @@ def edit_message(msg_id: int, body: EditRequest):
 
 
 @app.post("/api/agent/messages/{msg_id}/skip")
-def skip_message(msg_id: int):
+def skip_message(msg_id: int, user: str = Depends(verify_credentials)):
     conn = get_db()
     conn.execute("UPDATE messages SET status='skipped' WHERE id=?", (msg_id,))
     conn.commit()
@@ -797,7 +815,7 @@ def skip_message(msg_id: int):
 
 
 @app.post("/api/agent/messages/{msg_id}/resend")
-def resend_message(msg_id: int):
+def resend_message(msg_id: int, user: str = Depends(verify_credentials)):
     conn = get_db()
     conn.execute("UPDATE messages SET status='sent', sentAt=? WHERE id=?",
                  (datetime.now().isoformat(), msg_id))
@@ -807,7 +825,7 @@ def resend_message(msg_id: int):
 
 
 @app.post("/api/agent/messages/{msg_id}/test-dm")
-def test_dm(msg_id: int):
+def test_dm(msg_id: int, user: str = Depends(verify_credentials)):
     conn = get_db()
     msg = conn.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
     conn.close()
@@ -844,13 +862,13 @@ def test_dm(msg_id: int):
 
 
 @app.post("/api/agent/sync")
-def sync(body: SyncRequest):
+def sync(body: SyncRequest, user: str = Depends(verify_credentials)):
     result = run_sync(dry_run=body.dryRun, lookback_days=body.lookbackDays)
     return result
 
 
 @app.get("/api/agent/recent-hires")
-def recent_hires():
+def recent_hires(user: str = Depends(verify_credentials)):
     employees = bamboo_report()
     today = datetime.today()
     result = []
