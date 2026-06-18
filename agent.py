@@ -609,6 +609,9 @@ def run_sync(dry_run: bool = False, lookback_days: int = 60) -> dict:
         }
 
     except Exception as e:
+        import traceback
+        print(f"[Sync ERROR] {type(e).__name__}: {e}")
+        print(traceback.format_exc())
         c.execute("UPDATE runs SET status='failed', completedAt=? WHERE id=?",
                   (datetime.now().isoformat(), run_id))
         conn.commit()
