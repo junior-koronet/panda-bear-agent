@@ -461,19 +461,10 @@ def init_db():
             createdAt TEXT NOT NULL,
             status TEXT DEFAULT 'pending_approval',
             messageCount INTEGER DEFAULT 0,
-            employeeName TEXT,
             approvedAt TEXT,
             rejectedAt TEXT
         )
     """)
-    # Migración: agregar columna employeeName si no existe
-    try:
-        c.execute("ALTER TABLE batches ADD COLUMN employeeName TEXT")
-        conn.commit()
-        print("✅ Migración: columna employeeName agregada")
-    except:
-        pass  # Ya existe
-
     conn.commit()
     conn.close()
     print("✅ Base de datos SQLite inicializada")
@@ -536,8 +527,8 @@ def run_sync(dry_run: bool = False, lookback_days: int = 60) -> dict:
                 manager   = emp.get("supervisor", "")
 
                 # Crear un batch POR EMPLEADO
-                c.execute("INSERT INTO batches (createdAt, messageCount, employeeName) VALUES (?, 3, ?)",
-                          (datetime.now().isoformat(), emp_name))
+                c.execute("INSERT INTO batches (createdAt, messageCount) VALUES (?, 3)",
+                          (datetime.now().isoformat(),))
                 batch_id = c.lastrowid
                 conn.commit()
 
@@ -887,11 +878,6 @@ def reset_db():
     conn.execute("DELETE FROM messages")
     conn.execute("DELETE FROM batches")
     conn.execute("DELETE FROM runs")
-    # Forzar migración
-    try:
-        conn.execute("ALTER TABLE batches ADD COLUMN employeeName TEXT")
-    except:
-        pass
     conn.commit()
     conn.close()
     return {"reset": True}

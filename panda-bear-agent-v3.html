@@ -170,7 +170,7 @@ async function renderDashboard() {
       </div>
       ${pending.map(b => `
         <div class="approval-card">
-          <div class="approval-card-title">⏳ Pendiente — ${b.employeeName || 'Batch #'+b.id} · ${b.messageCount} mensaje(s)</div>
+          <div class="approval-card-title">⏳ Pendiente — Batch #${b.id} · ${b.messageCount} mensaje(s)</div>
           <div style="font-size:13px;color:var(--text2);margin-bottom:12px">Esperando tu aprobación antes de enviar.</div>
           <div style="display:flex;gap:8px">
             <button class="act-btn approve" onclick="approveBatch(${b.id})">✅ Aprobar & Enviar</button>
@@ -311,7 +311,8 @@ async function reviewBatch(id) {
     const batch = await apiFetch(`/agent/batches/${id}`);
     const m = document.getElementById('modal-content');
     const msgs = batch.messages || [];
-    m.innerHTML = `<div class="modal-title">👁 ${batch.employeeName || 'Batch #'+id} — ${msgs.length} mensaje(s)</div>
+    const empName = msgs.length > 0 ? msgs[0].employeeName : 'Batch #'+id;
+    m.innerHTML = `<div class="modal-title">👁 ${empName} — ${msgs.length} mensaje(s)</div>
       ${msgs.length===0?'<div class="empty"><div class="icon">📭</div>No hay mensajes.</div>'
         :msgs.map(msg=>`
         <div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:16px">
