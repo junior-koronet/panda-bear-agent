@@ -670,7 +670,7 @@ def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
     return credentials.username
 
 @app.get("/")
-def serve_dashboard(user: str = Depends(verify_credentials)):
+def serve_dashboard():
     dashboard_path = os.path.join(BASE_DIR, "panda-bear-agent-v3.html")
     if os.path.exists(dashboard_path):
         return FileResponse(dashboard_path)
