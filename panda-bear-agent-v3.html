@@ -330,7 +330,7 @@
   <div class="config-banner">
     <span style="color:var(--teal)">🔗</span>
     <span style="color:var(--text3);white-space:nowrap;font-size:12px">API URL:</span>
-    <input type="text" id="api-url" placeholder="http://localhost:8000" />
+    <input type="text" id="api-url" placeholder="https://panda-bear-agent.onrender.com" />
     <button class="btn-primary" onclick="saveConfig()" style="white-space:nowrap;padding:7px 14px;font-size:12px">Connect</button>
   </div>
   <div id="page-content"></div>
@@ -342,7 +342,7 @@
 </div>
 
 <script>
-let API_URL = localStorage.getItem('panda_api_url') || 'http://localhost:8000';
+let API_URL = localStorage.getItem('panda_api_url') || 'https://panda-bear-agent.onrender.com';
 let currentPage = 'dashboard';
 let toastTimer = null;
 
