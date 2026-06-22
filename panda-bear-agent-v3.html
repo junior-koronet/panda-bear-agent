@@ -150,6 +150,24 @@ async function renderDashboard() {
       apiFetch('/agent/batches')
     ]);
     const pending = batches.filter(b => b.status === 'pending_approval');
+    
+    // Pre-fetch employee names for each batch
+    const batchDetails = await Promise.all(pending.map(b => apiFetch('/agent/batches/'+b.id).catch(() => ({messages:[]}))));
+    const pendingCards = pending.map((b, i) => {
+      const msgs = batchDetails[i].messages || [];
+      const empName = msgs.length > 0 ? msgs[0].employeeName : 'Batch #'+b.id;
+      return `
+        <div class="approval-card">
+          <div class="approval-card-title">⏳ Pendiente — ${empName} · ${b.messageCount} mensaje(s)</div>
+          <div style="font-size:13px;color:var(--text2);margin-bottom:12px">Esperando tu aprobación antes de enviar.</div>
+          <div style="display:flex;gap:8px">
+            <button class="act-btn approve" onclick="approveBatch(${b.id})">✅ Aprobar & Enviar</button>
+            <button class="act-btn reject" onclick="rejectBatch(${b.id})">❌ Rechazar</button>
+            <button class="act-btn" onclick="reviewBatch(${b.id})">👁 Revisar Mensajes</button>
+          </div>
+        </div>`;
+    }).join('');
+
     c.innerHTML = `
       <div class="page-header"><div class="page-title">Dashboard</div><div class="page-sub">Panda Bear Agent · Koronet Onboarding</div></div>
       <div class="integrations-row">
@@ -168,23 +186,7 @@ async function renderDashboard() {
         <button class="btn-secondary" id="dry-btn" onclick="runSync(true)">🔍 Dry Run</button>
         <button class="btn-secondary" onclick="resetDB()" style="border-color:#dc2626;color:#dc2626">🗑 Reset DB</button>
       </div>
-      ${await Promise.all(pending.map(async b => {
-        let empName = 'Batch #'+b.id;
-        try {
-          const bd = await apiFetch('/agent/batches/'+b.id);
-          if (bd.messages && bd.messages.length > 0) empName = bd.messages[0].employeeName;
-        } catch(e) {}
-        return `
-        <div class="approval-card">
-          <div class="approval-card-title">⏳ Pendiente — ${empName} · ${b.messageCount} mensaje(s)</div>
-          <div style="font-size:13px;color:var(--text2);margin-bottom:12px">Esperando tu aprobación antes de enviar.</div>
-          <div style="display:flex;gap:8px">
-            <button class="act-btn approve" onclick="approveBatch(${b.id})">✅ Aprobar & Enviar</button>
-            <button class="act-btn reject" onclick="rejectBatch(${b.id})">❌ Rechazar</button>
-            <button class="act-btn" onclick="reviewBatch(${b.id})">👁 Revisar Mensajes</button>
-          </div>
-        </div>`;
-      })).then(cards => cards.join(''))}
+      ${pendingCards}
       <div class="section">
         <div class="section-header"><div class="section-title">Mensajes Recientes</div></div>
         ${stats.recentMessages.length === 0
