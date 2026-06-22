@@ -884,6 +884,10 @@ def reset_db():
     conn.commit()
     conn.close()
     return {"reset": True}
+
+
+@app.post("/api/agent/sync")
+def sync(body: SyncRequest):
     result = run_sync(dry_run=body.dryRun, lookback_days=body.lookbackDays)
     return result
 
