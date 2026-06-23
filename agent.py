@@ -623,15 +623,19 @@ def run_sync(dry_run: bool = False, lookback_days: int = 60) -> dict:
 def notify_approver(batch_id: int, new_employees: list):
     try:
         for emp, hire_date in new_employees:
-            emp_name = f"{emp.get('firstName','')} {emp.get('lastName','')}"
+            emp_name  = f"{emp.get('firstName','')} {emp.get('lastName','')}".strip()
+            job_title = emp.get('jobTitle') or 'N/A'
+            location  = emp.get('location') or emp.get('country') or 'N/A'
+            supervisor = emp.get('supervisor') or 'N/A'
             send_date = get_manager_send_date(hire_date).strftime('%d/%m/%Y')
+            print(f"[Notify] Campos: {list(emp.keys())}")
             text = (
                 f"🐼 *Panda Bear Agent* — Nuevo ingreso detectado!\n\n"
                 f"👤 *{emp_name}*\n"
-                f"💼 {emp.get('jobTitle', 'N/A')}\n"
-                f"📍 {emp.get('location', 'N/A')}\n"
+                f"💼 {job_title}\n"
+                f"📍 {location}\n"
                 f"📅 Inicia el {hire_date.strftime('%d/%m/%Y')}\n"
-                f"👔 Manager: {emp.get('supervisor', 'N/A')}\n\n"
+                f"👔 Manager: {supervisor}\n\n"
                 f"📨 Mensaje al manager: {send_date}\n"
                 f"👉 Abre el dashboard para aprobar los mensajes."
             )
