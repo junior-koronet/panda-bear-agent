@@ -478,6 +478,24 @@ def get_db():
 
 # ─── SYNC LOGIC ───────────────────────────────────────────────
 
+
+def get_employee_details(employee_id: str) -> dict:
+    """Obtiene datos completos de un empleado por su ID."""
+    fields = ",".join([
+        "firstName", "lastName", "jobTitle", "department", "hireDate",
+        "workEmail", "mobilePhone", "supervisor", "location", "division",
+        "employmentHistoryStatus", "employeeNumber", "country", "state", "city"
+    ])
+    url = f"https://api.bamboohr.com/api/gateway.php/{BAMBOO_SUBDOMAIN}/v1/employees/{employee_id}?fields={fields}"
+    response = requests.get(
+        url, auth=(BAMBOO_API_KEY, "x"),
+        headers={"Accept": "application/json"}, timeout=15,
+    )
+    if response.ok:
+        return response.json()
+    print(f"[BambooHR] Error obteniendo empleado {employee_id}: {response.status_code}")
+    return {}
+
 def run_sync(dry_run: bool = False, lookback_days: int = 60) -> dict:
     conn = get_db()
     c = conn.cursor()
@@ -519,10 +537,20 @@ def run_sync(dry_run: bool = False, lookback_days: int = 60) -> dict:
 
         if new_employees and not dry_run:
             for emp, hire_date in new_employees:
+                # Enriquecer con datos individuales del empleado
+                bamboo_id = str(emp.get("id", ""))
+                if bamboo_id:
+                    details = get_employee_details(bamboo_id)
+                    if details:
+                        # Mezclar datos del reporte con datos individuales
+                        for k, v in details.items():
+                            if v and emp.get(k) is None:
+                                emp[k] = v
+
                 emp_name  = f"{emp.get('firstName', '')} {emp.get('lastName', '')}".strip()
                 emp_id    = str(emp.get("employeeNumber", ""))
                 bamboo_id = str(emp.get("id", emp_id))
-                location  = emp.get("location", "")
+                location  = emp.get("location", "") or emp.get("country", "")
                 country   = emp.get("country", "")
                 manager   = emp.get("supervisor", "")
 
@@ -628,15 +656,15 @@ def notify_approver(batch_id: int, new_employees: list):
             location  = emp.get('location') or emp.get('country') or 'N/A'
             supervisor = emp.get('supervisor') or 'N/A'
             send_date = get_manager_send_date(hire_date).strftime('%d/%m/%Y')
-            print(f"[Notify] Campos: {list(emp.keys())}")
+            print(f"[Notify] Datos emp: jobTitle={emp.get('jobTitle')} location={emp.get('location')} supervisor={emp.get('supervisor')}")
             text = (
                 f"🐼 *Panda Bear Agent* — Nuevo ingreso detectado!\n\n"
                 f"👤 *{emp_name}*\n"
-                f"💼 {job_title}\n"
-                f"📍 {location}\n"
-                f"📅 Inicia el {hire_date.strftime('%d/%m/%Y')}\n"
-                f"👔 Manager: {supervisor}\n\n"
-                f"📨 Mensaje al manager: {send_date}\n"
+                + (f"💼 {job_title}\n" if job_title != 'N/A' else "")
+                + (f"📍 {location}\n" if location != 'N/A' else "")
+                + f"📅 Inicia el {hire_date.strftime('%d/%m/%Y')}\n"
+                + (f"👔 Manager: {supervisor}\n" if supervisor != 'N/A' else "")
+                + f"\n📨 Mensaje al manager: {send_date}\n"
                 f"👉 Abre el dashboard para aprobar los mensajes."
             )
             users = slack_client.users_list()
