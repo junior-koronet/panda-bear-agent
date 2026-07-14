@@ -1099,4 +1099,15 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    # Forward to the v4 architecture entry point.
+    # This allows Render to keep "python agent.py" as start command
+    # while the actual app runs from main.py (v4 architecture).
+    import os
+    import uvicorn as _uv
+    _uv.run(
+        "main:app",
+        host="0.0.0.0",
+        port=int(os.getenv("PORT", 8000)),
+        log_level="warning",
+        reload=False,
+    )
