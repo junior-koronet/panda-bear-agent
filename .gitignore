@@ -1,1 +1,10 @@
-.env 
+.env
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+generated_images/
+panda_bear.db
+.DS_Store
+*.egg-info/
+

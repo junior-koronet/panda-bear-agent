@@ -1,0 +1,952 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Panda Bear — People Operations Agent</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap');
+:root {
+  --bg:#f5f5f5;--bg2:#fff;--bg3:#f0f0f0;--border:#e5e5e5;
+  --sidebar:#111;--sidebar2:#1a1a1a;--sidebar-border:#2a2a2a;
+  --teal:#00b8ad;--teal2:#009990;--text:#1a1a1a;--text2:#555;--text3:#999;
+  --green:#16a34a;--yellow:#d97706;--red:#dc2626;--purple:#9333ea;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;overflow-x:hidden}
+.sidebar{position:fixed;left:0;top:0;bottom:0;width:228px;background:var(--sidebar);display:flex;flex-direction:column;z-index:100}
+.logo{padding:20px;border-bottom:1px solid var(--sidebar-border)}
+.logo-title{font-size:17px;font-weight:800;color:#fff}
+.logo-title span{color:var(--teal)}
+.logo-sub{font-size:11px;color:#555;margin-top:3px;font-family:'JetBrains Mono',monospace}
+.logo-badge{display:inline-block;margin-top:6px;font-size:10px;background:rgba(0,184,173,.15);color:var(--teal);border-radius:4px;padding:2px 7px;font-weight:600;letter-spacing:.05em}
+.nav{padding:10px 0;flex:1;overflow-y:auto}
+.nav-section{padding:8px 20px 4px;font-size:10px;color:#444;text-transform:uppercase;letter-spacing:.1em;font-weight:600}
+.nav-item{display:flex;align-items:center;gap:10px;padding:9px 20px;cursor:pointer;color:#888;font-size:13.5px;font-weight:500;transition:all .15s;border-left:2px solid transparent}
+.nav-item:hover{color:#fff;background:var(--sidebar2)}
+.nav-item.active{color:var(--teal);border-left-color:var(--teal);background:rgba(0,184,173,.08)}
+.nav-icon{font-size:15px;width:18px;text-align:center}
+.sidebar-footer{padding:14px 20px;border-top:1px solid var(--sidebar-border);font-size:11px;color:#555;line-height:1.6}
+.main{margin-left:228px;min-height:100vh;padding:28px 32px}
+.page-header{margin-bottom:24px}
+.page-title{font-size:22px;font-weight:800;letter-spacing:-.5px}
+.page-sub{font-size:13px;color:var(--text2);margin-top:3px}
+.stats-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
+.stat-card{background:var(--bg2);border:1px solid var(--border);border-radius:10px;padding:18px;position:relative;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.stat-card::after{content:'';position:absolute;bottom:0;left:0;right:0;height:2px;background:var(--teal);opacity:.5}
+.stat-label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-bottom:10px}
+.stat-value{font-size:30px;font-weight:800;font-family:'JetBrains Mono',monospace;letter-spacing:-1px}
+.integrations-row{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap}
+.int-pill{display:flex;align-items:center;gap:7px;background:var(--bg2);border:1px solid var(--border);border-radius:100px;padding:7px 14px;font-size:12px;font-weight:600;color:var(--text2);box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.dot{width:7px;height:7px;border-radius:50%}
+.dot.green{background:var(--green);box-shadow:0 0 5px var(--green)}
+.dot.red{background:var(--red)}
+.btn-row{display:flex;gap:10px;margin-bottom:20px;flex-wrap:wrap}
+.btn-primary{display:flex;align-items:center;gap:8px;background:var(--teal);color:#fff;border:none;border-radius:8px;padding:11px 22px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Outfit',sans-serif;transition:all .2s}
+.btn-primary:hover{background:var(--teal2);transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,184,173,.3)}
+.btn-primary:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.btn-secondary{display:flex;align-items:center;gap:8px;background:var(--bg2);color:var(--text2);border:1px solid var(--border);border-radius:8px;padding:11px 22px;font-size:14px;font-weight:600;cursor:pointer;font-family:'Outfit',sans-serif;transition:all .15s}
+.btn-secondary:hover{border-color:var(--teal);color:var(--teal)}
+.section{background:var(--bg2);border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:16px;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.section-header{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.section-title{font-size:14px;font-weight:700}
+.section-sub{font-size:12px;color:var(--text3);cursor:pointer;transition:color .15s}
+.section-sub:hover{color:var(--teal)}
+.table{width:100%;border-collapse:collapse}
+.table th{padding:10px 16px;text-align:left;font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.07em;font-weight:600;background:var(--bg3);border-bottom:1px solid var(--border)}
+.table td{padding:12px 16px;font-size:13px;border-bottom:1px solid var(--border);vertical-align:middle}
+.table tr:last-child td{border-bottom:none}
+.table tr:hover td{background:var(--bg3)}
+.badge{display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:100px;font-size:11px;font-weight:700}
+.badge.sent{background:rgba(22,163,74,.1);color:var(--green)}
+.badge.pending,.badge.running{background:rgba(217,119,6,.1);color:var(--yellow)}
+.badge.pending_approval{background:rgba(147,51,234,.1);color:var(--purple)}
+.badge.failed{background:rgba(220,38,38,.1);color:var(--red)}
+.badge.skipped,.badge.rejected{background:rgba(153,153,153,.1);color:var(--text3)}
+.badge.completed{background:rgba(22,163,74,.1);color:var(--green)}
+.act-btn{background:var(--bg3);border:1px solid var(--border);color:var(--text2);border-radius:5px;padding:4px 9px;font-size:11px;font-weight:600;cursor:pointer;font-family:'Outfit',sans-serif;transition:all .15s;margin-right:4px}
+.act-btn:hover{border-color:var(--teal);color:var(--teal)}
+.act-btn.approve:hover{border-color:var(--green);color:var(--green)}
+.act-btn.reject:hover{border-color:var(--red);color:var(--red)}
+.empty{padding:48px;text-align:center;color:var(--text3);font-size:13px}
+.empty .icon{font-size:28px;margin-bottom:10px}
+.loading{padding:32px;text-align:center;color:var(--text3);font-size:13px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid var(--border);border-top-color:var(--teal);border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000;padding:20px}
+.modal{background:var(--bg2);border:1px solid var(--border);border-radius:14px;padding:24px;width:100%;max-width:620px;max-height:85vh;overflow-y:auto;box-shadow:0 20px 60px rgba(0,0,0,.15)}
+.modal-title{font-size:16px;font-weight:700;margin-bottom:16px}
+.modal textarea{width:100%;background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:10px 12px;color:var(--text);font-size:13px;font-family:'Outfit',sans-serif;resize:vertical;min-height:100px;outline:none;margin-bottom:12px}
+.modal textarea:focus{border-color:var(--teal)}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap;margin-top:12px}
+.msg-preview{background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:12px;font-size:13px;line-height:1.7;white-space:pre-wrap;margin-bottom:14px;max-height:200px;overflow-y:auto;color:var(--text2)}
+.approval-card{background:rgba(147,51,234,.04);border:1px solid rgba(147,51,234,.15);border-radius:10px;padding:18px;margin-bottom:16px}
+.approval-card-title{font-size:14px;font-weight:700;color:var(--purple);margin-bottom:6px}
+.approval-card-sub{font-size:13px;color:var(--text2);margin-bottom:12px}
+.toast{position:fixed;bottom:20px;right:20px;background:var(--sidebar);color:#fff;border-radius:8px;padding:11px 16px;font-size:13px;z-index:9999;display:flex;align-items:center;gap:8px;box-shadow:0 4px 16px rgba(0,0,0,.2);animation:slideIn .25s ease}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* Morning brief */
+.brief-box{background:linear-gradient(135deg,rgba(0,184,173,.08),rgba(0,184,173,.03));border:1px solid rgba(0,184,173,.2);border-radius:12px;padding:20px 24px;margin-bottom:20px}
+.brief-panda{font-size:22px;margin-bottom:8px}
+.brief-text{font-size:15px;line-height:1.65;color:var(--text);font-weight:500}
+.brief-date{font-size:12px;color:var(--text3);margin-top:6px;font-family:'JetBrains Mono',monospace}
+
+/* Timeline */
+.timeline{padding:20px}
+.timeline-item{display:flex;gap:12px;margin-bottom:16px;position:relative}
+.timeline-item::before{content:'';position:absolute;left:12px;top:24px;bottom:-16px;width:1px;background:var(--border)}
+.timeline-item:last-child::before{display:none}
+.tl-dot{width:25px;height:25px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;z-index:1}
+.tl-dot.message{background:rgba(0,184,173,.15);color:var(--teal)}
+.tl-dot.decision{background:rgba(147,51,234,.15);color:var(--purple)}
+.tl-dot.approval{background:rgba(22,163,74,.15);color:var(--green)}
+.tl-content{flex:1;padding-top:2px}
+.tl-title{font-size:13px;font-weight:600}
+.tl-detail{font-size:12px;color:var(--text3);margin-top:2px}
+
+/* Conversation */
+.chat-wrapper{height:420px;display:flex;flex-direction:column}
+.chat-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+.chat-msg{max-width:78%;padding:10px 14px;border-radius:12px;font-size:13.5px;line-height:1.55}
+.chat-msg.user{background:var(--teal);color:#fff;align-self:flex-end;border-bottom-right-radius:4px}
+.chat-msg.assistant{background:var(--bg3);color:var(--text);align-self:flex-start;border-bottom-left-radius:4px;border:1px solid var(--border)}
+.chat-input-row{display:flex;gap:10px;padding:14px 16px;border-top:1px solid var(--border)}
+.chat-input{flex:1;background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:10px 14px;font-size:13.5px;font-family:'Outfit',sans-serif;color:var(--text);outline:none}
+.chat-input:focus{border-color:var(--teal)}
+.chat-send{background:var(--teal);color:#fff;border:none;border-radius:8px;padding:10px 18px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Outfit',sans-serif;transition:background .2s}
+.chat-send:hover{background:var(--teal2)}
+
+/* Identity */
+.identity-card{background:var(--bg2);border:1px solid var(--border);border-radius:12px;padding:24px;margin-bottom:16px}
+.id-name{font-size:24px;font-weight:800;margin-bottom:4px}
+.id-role{font-size:14px;color:var(--teal);font-weight:600;margin-bottom:16px}
+.id-section{margin-bottom:16px}
+.id-section-title{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.08em;font-weight:600;margin-bottom:8px}
+.constitution-rule{background:var(--bg3);border-left:3px solid var(--teal);border-radius:0 6px 6px 0;padding:8px 12px;margin-bottom:6px;font-size:13px}
+.goal-item{display:flex;gap:10px;align-items:flex-start;margin-bottom:8px}
+.goal-id{background:var(--teal);color:#fff;border-radius:5px;padding:2px 7px;font-size:11px;font-weight:700;white-space:nowrap}
+.skill-pill{display:inline-flex;align-items:center;gap:6px;background:var(--bg3);border:1px solid var(--border);border-radius:100px;padding:5px 12px;font-size:12px;font-weight:600;margin:3px}
+.memory-row{display:flex;gap:14px;flex-wrap:wrap;margin-bottom:4px}
+.memory-stat{background:var(--bg3);border-radius:8px;padding:10px 14px;font-size:13px;text-align:center}
+.memory-stat-val{font-size:20px;font-weight:800;font-family:'JetBrains Mono',monospace;color:var(--teal)}
+.memory-stat-label{font-size:11px;color:var(--text3);margin-top:2px}
+
+/* Ops Center */
+.health-banner{border-radius:10px;padding:18px 24px;margin-bottom:20px;display:flex;align-items:center;gap:16px}
+.health-banner.green{background:rgba(22,163,74,.1);border:1px solid rgba(22,163,74,.25)}
+.health-banner.yellow{background:rgba(217,119,6,.1);border:1px solid rgba(217,119,6,.25)}
+.health-banner.red{background:rgba(220,38,38,.1);border:1px solid rgba(220,38,38,.25)}
+.health-dot{width:14px;height:14px;border-radius:50%;flex-shrink:0}
+.health-dot.green{background:var(--green);box-shadow:0 0 8px var(--green)}
+.health-dot.yellow{background:var(--yellow);box-shadow:0 0 8px var(--yellow)}
+.health-dot.red{background:var(--red);box-shadow:0 0 8px var(--red)}
+.health-title{font-size:16px;font-weight:800}
+.health-sub{font-size:12px;margin-top:2px;opacity:.75}
+
+/* Scope cards */
+.scope-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px;padding:16px}
+.scope-card{border-radius:8px;padding:12px 14px;border:1px solid;font-size:12px}
+.scope-card.ok{background:rgba(22,163,74,.06);border-color:rgba(22,163,74,.2)}
+.scope-card.miss{background:rgba(220,38,38,.06);border-color:rgba(220,38,38,.2)}
+.scope-card.miss-crit{background:rgba(220,38,38,.1);border-color:rgba(220,38,38,.35)}
+.scope-name{font-family:'JetBrains Mono',monospace;font-weight:700;margin-bottom:4px}
+.scope-desc{color:var(--text2);line-height:1.4}
+.scope-feature{margin-top:4px;color:var(--text3);font-style:italic}
+
+/* Incident cards */
+.incident-card{border-radius:10px;padding:16px 18px;margin-bottom:12px;border:1px solid}
+.incident-card.unresolved{background:rgba(220,38,38,.04);border-color:rgba(220,38,38,.2)}
+.incident-card.recoverable{background:rgba(217,119,6,.04);border-color:rgba(217,119,6,.2)}
+.incident-type{font-family:'JetBrains Mono',monospace;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin-bottom:4px}
+.incident-cause{font-size:13px;color:var(--text2);margin-bottom:8px;line-height:1.5}
+.incident-steps{font-size:12px;color:var(--text3);line-height:1.7;background:var(--bg3);border-radius:6px;padding:10px 12px;font-family:'JetBrains Mono',monospace}
+
+/* Audit dimensions */
+.audit-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;padding:16px}
+.audit-card{border-radius:10px;padding:16px;border:1px solid var(--border);background:var(--bg2)}
+.audit-score{font-size:28px;font-weight:800;font-family:'JetBrains Mono',monospace;margin-bottom:4px}
+.audit-bar{height:4px;border-radius:2px;background:var(--bg3);margin-top:8px;overflow:hidden}
+.audit-fill{height:100%;border-radius:2px;transition:width .5s}
+.audit-label{font-size:11px;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;font-weight:600;margin-bottom:2px}
+.audit-issues{font-size:11px;color:var(--text2);margin-top:6px;line-height:1.5}
+</style>
+</head>
+<body>
+<nav class="sidebar">
+  <div class="logo">
+    <div class="logo-title">Panda <span>Bear</span></div>
+    <div class="logo-sub">People Ops Agent · Koronet</div>
+    <div class="logo-badge">v4.0 AGENT</div>
+  </div>
+  <div class="nav">
+    <div class="nav-section">Oficina</div>
+    <div class="nav-item active" onclick="nav('brief',this)"><span class="nav-icon">🌅</span> Morning Brief</div>
+    <div class="nav-item" onclick="nav('approvals',this)"><span class="nav-icon">✅</span> Approvals</div>
+    <div class="nav-item" onclick="nav('conversation',this)"><span class="nav-icon">💬</span> Conversation</div>
+    <div class="nav-section">Onboarding</div>
+    <div class="nav-item" onclick="nav('messages',this)"><span class="nav-icon">📨</span> Messages</div>
+    <div class="nav-item" onclick="nav('hires',this)"><span class="nav-icon">👤</span> Upcoming Hires</div>
+    <div class="nav-item" onclick="nav('runs',this)"><span class="nav-icon">⚡</span> Runs</div>
+    <div class="nav-section">Agent</div>
+    <div class="nav-item" onclick="nav('identity',this)"><span class="nav-icon">🐼</span> Identity</div>
+    <div class="nav-item" onclick="nav('memory',this)"><span class="nav-icon">🧠</span> Memory</div>
+    <div class="nav-item" onclick="nav('decisions',this)"><span class="nav-icon">📋</span> Decisions</div>
+    <div class="nav-item" onclick="nav('services',this)"><span class="nav-icon">⚙️</span> Services</div>
+    <div class="nav-section">Sistema</div>
+    <div class="nav-item" onclick="nav('ops',this)"><span class="nav-icon">📡</span> Ops Center</div>
+    <div class="nav-item" onclick="nav('incidents',this)"><span class="nav-icon">🚨</span> Incidents</div>
+    <div class="nav-item" onclick="nav('execution',this)"><span class="nav-icon">📦</span> Ejecución</div>
+    <div class="nav-item" onclick="nav('audit',this)"><span class="nav-icon">🎯</span> Prod Audit</div>
+  </div>
+  <div class="sidebar-footer">
+    <div style="font-weight:600;color:#ccc;margin-bottom:2px">Junior Osorio</div>
+    <div>People Operations · Koronet</div>
+    <div style="color:#444">junior@koronet.com</div>
+  </div>
+</nav>
+
+<main class="main">
+  <div id="page-content"><div class="loading"><span class="spinner"></span> Conectando con Panda Bear...</div></div>
+</main>
+
+<div class="toast" id="toast" style="display:none"></div>
+<div class="modal-overlay" id="modal" style="display:none" onclick="closeModal(event)">
+  <div class="modal" id="modal-content"></div>
+</div>
+
+<script>
+const BASE = window.location.origin;
+let currentPage = 'brief';
+let chatSession = 'hr_' + Date.now();
+let toastTimer = null;
+
+function showToast(msg, d=3500) {
+  const t = document.getElementById('toast');
+  t.innerHTML = msg; t.style.display = 'flex';
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.style.display='none', d);
+}
+
+async function api(path, opts={}) {
+  const r = await fetch(BASE + '/api' + path, {headers:{'Content-Type':'application/json'}, ...opts});
+  if (!r.ok) throw new Error('HTTP ' + r.status);
+  return r.json();
+}
+
+function nav(page, el) {
+  currentPage = page;
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  if (el) el.classList.add('active');
+  render(page);
+}
+
+function render(page) {
+  const el = document.getElementById('page-content');
+  el.innerHTML = '<div class="loading"><span class="spinner"></span> Preguntando al agente...</div>';
+  ({
+    brief: renderBrief, approvals: renderApprovals, conversation: renderConversation,
+    messages: renderMessages, hires: renderHires, runs: renderRuns,
+    identity: renderIdentity, memory: renderMemory, decisions: renderDecisions, services: renderServices,
+    ops: renderOpsCenter, incidents: renderIncidents, execution: renderExecution, audit: renderProdAudit,
+  }[page] || renderBrief)();
+}
+
+const BADGES = {sent:'✓ Sent',pending:'⏳ Pending',pending_approval:'👁 Awaiting',failed:'✗ Failed',skipped:'⏭ Skipped',rejected:'✗ Rejected',running:'⟳ Running',completed:'✓ Done'};
+const TYPE_LABEL = {employee_email:'📧 Correo Empleado',manager_slack:'💬 Slack Manager',bienvenidas_slack:'🎉 #Koronet'};
+function badge(s){return `<span class="badge ${s}">${BADGES[s]||s}</span>`}
+function esc(s){return(s||'').replace(/`/g,'\\`').replace(/\$/g,'\\$')}
+
+// ── MORNING BRIEF ────────────────────────────────────────────────
+async function renderBrief() {
+  const c = document.getElementById('page-content');
+  try {
+    const [brief, integ] = await Promise.all([api('/agent/morning-brief'), api('/agent/integrations/status')]);
+    const s = brief.stats;
+    c.innerHTML = `
+      <div class="page-header"><div class="page-title">Buenos días ☀️</div><div class="page-sub">Panda Bear te informa del estado del onboarding</div></div>
+      <div class="brief-box">
+        <div class="brief-panda">🐼</div>
+        <div class="brief-text">${brief.narrative}</div>
+        <div class="brief-date">${brief.date} · Estado actualizado por el agente</div>
+      </div>
+      <div class="integrations-row">
+        ${renderInt('BambooHR', integ.bamboohr)}${renderInt('Slack', integ.slack)}${renderInt('Groq AI', integ.anthropic)}
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Hires Today</div><div class="stat-value" style="color:${s.hiresToday>0?'var(--teal)':'var(--text)'}">${s.hiresToday}</div></div>
+        <div class="stat-card"><div class="stat-label">Pending Approval</div><div class="stat-value" style="color:${s.pendingApproval>0?'var(--purple)':'var(--text)'}">${s.pendingApproval}</div></div>
+        <div class="stat-card"><div class="stat-label">Sent</div><div class="stat-value">${s.totalSent}</div></div>
+        <div class="stat-card"><div class="stat-label">Failed</div><div class="stat-value" style="color:${s.totalFailed>0?'var(--red)':'var(--text)'}">${s.totalFailed}</div></div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-primary" id="sync-btn" onclick="runSync(false)">▶ Run Sync</button>
+        <button class="btn-secondary" id="dry-btn" onclick="runSync(true)">🔍 Dry Run</button>
+      </div>
+      ${s.pendingApproval > 0 ? `<div style="margin-bottom:12px;font-size:13px;color:var(--purple);font-weight:600">⏳ Hay ${s.pendingApproval} batch(es) esperando tu aprobación →  <span style="cursor:pointer;text-decoration:underline" onclick="nav('approvals', document.querySelectorAll('.nav-item')[1])">Ver Approvals</span></div>` : ''}
+      ${brief.upcomingToday.length > 0 ? `
+        <div class="section">
+          <div class="section-header"><div class="section-title">Ingresan hoy</div></div>
+          <table class="table"><thead><tr><th>Nombre</th><th>Cargo</th><th>Departamento</th></tr></thead><tbody>
+          ${brief.upcomingToday.map(h=>`<tr><td style="font-weight:600">${h.name}</td><td style="color:var(--text2)">${h.jobTitle||'—'}</td><td style="color:var(--text3)">${h.department||'—'}</td></tr>`).join('')}
+          </tbody></table>
+        </div>` : ''}
+      <div class="section">
+        <div class="section-header"><div class="section-title">Mensajes Recientes</div><span class="section-sub" onclick="nav('messages',document.querySelectorAll('.nav-item')[3])">Ver todos →</span></div>
+        ${brief.recentMessages && brief.recentMessages.length > 0
+          ? renderMsgTable(brief.recentMessages.slice(0,5))
+          : '<div class="empty"><div class="icon">📭</div>No hay mensajes. Corre un sync para comenzar.</div>'}
+      </div>`;
+
+    // Reuse recent messages from stats if morning brief doesn't have them
+    if (!brief.recentMessages) {
+      const stats = await api('/agent/stats');
+      const tbody = c.querySelector('tbody');
+      if (tbody && stats.recentMessages) tbody.innerHTML = stats.recentMessages.slice(0,5).map(m=>msgRow(m)).join('');
+    }
+  } catch(e) {
+    c.innerHTML = `<div class="section"><div class="empty"><div class="icon">⚠️</div>No se pudo conectar al agente.<br><small>${e.message}</small></div></div>`;
+  }
+}
+
+function renderInt(name, s) {
+  return `<div class="int-pill"><div class="dot ${s?.connected?'green':'red'}"></div>${name}${s?.detail?`<span style="color:var(--text3);font-weight:400"> ${s.detail}</span>`:''}</div>`;
+}
+
+function renderMsgTable(msgs) {
+  return `<table class="table"><thead><tr><th>Empleado</th><th>Tipo</th><th>Manager</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody>${msgs.map(m=>msgRow(m)).join('')}</tbody></table>`;
+}
+
+function msgRow(m) {
+  return `<tr>
+    <td><div style="font-weight:600">${m.employeeName}</div><div style="font-size:11px;color:var(--text3)">${m.employeeJobTitle||''}</div></td>
+    <td style="font-size:12px;color:var(--teal)">${TYPE_LABEL[m.messageType]||m.messageType}</td>
+    <td style="color:var(--text2)">${m.managerName||'—'}</td>
+    <td>${badge(m.status)}</td>
+    <td style="color:var(--text3);font-size:12px;font-family:'JetBrains Mono',monospace">${new Date(m.createdAt).toLocaleDateString()}</td>
+    <td>
+      <button class="act-btn" onclick="viewMsg(${m.id},\`${esc(m.messageContent)}\`,'${m.employeeName}','${m.status}')">👁</button>
+      ${m.status==='pending_approval'?`<button class="act-btn" onclick="openEdit(${m.id},\`${esc(m.messageContent)}\`,'${m.employeeName}')">✏️</button>`:''}
+      ${m.status==='pending_approval'?`<button class="act-btn" onclick="testDm(${m.id})">🔔</button>`:''}
+      ${m.status==='pending_approval'?`<button class="act-btn" onclick="skipMsg(${m.id})">⏭</button>`:''}
+    </td></tr>`;
+}
+
+// ── APPROVALS ────────────────────────────────────────────────────
+async function renderApprovals() {
+  const c = document.getElementById('page-content');
+  try {
+    const batches = await api('/agent/batches');
+    c.innerHTML = `
+      <div class="page-header"><div class="page-title">Pending Approvals</div><div class="page-sub">El agente preparó estos mensajes. Nada fue enviado todavía.</div></div>
+      ${batches.length === 0
+        ? '<div class="section"><div class="empty"><div class="icon">✅</div>No hay mensajes pendientes de aprobación. Excelente!</div></div>'
+        : batches.map(b => `
+          <div class="approval-card">
+            <div class="approval-card-title">⏳ ${b.employeeName || 'Batch #'+b.id} — ${b.messageCount} mensaje(s)</div>
+            <div class="approval-card-sub">Preparado el ${new Date(b.createdAt).toLocaleString()}. Esperando tu revisión antes de enviar.</div>
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
+              <button class="act-btn approve" onclick="approveBatch(${b.id})">✅ Aprobar & Enviar</button>
+              <button class="act-btn reject" onclick="rejectBatch(${b.id})">❌ Rechazar</button>
+              <button class="act-btn" onclick="reviewBatch(${b.id})">👁 Revisar Mensajes</button>
+            </div>
+          </div>`).join('')}`;
+  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
+}
+
+// ── CONVERSATION ──────────────────────────────────────────────────
+function renderConversation() {
+  const c = document.getElementById('page-content');
+  c.innerHTML = `
+    <div class="page-header"><div class="page-title">Conversation</div><div class="page-sub">Habla directamente con Panda Bear. Consulta, pide cambios, explora datos.</div></div>
+    <div class="section">
+      <div class="section-header"><div class="section-title">🐼 Panda Bear</div><div style="font-size:11px;color:var(--text3)">Powered by Groq AI · llama-3.3-70b</div></div>
+      <div class="chat-wrapper">
+        <div class="chat-messages" id="chat-messages">
+          <div class="chat-msg assistant">Hola! Soy Panda Bear, tu agente de People Operations. Puedo consultarte información de BambooHR, explicar mis decisiones, generar versiones alternativas de mensajes, o simplemente conversar sobre el equipo. ¿En qué puedo ayudarte?</div>
+        </div>
+        <div class="chat-input-row">
+          <input class="chat-input" id="chat-input" type="text" placeholder="Ej: ¿Quién ingresa esta semana? / ¿Por qué decidiste este mensaje? / Panda, genera una versión más cálida..." onkeydown="if(event.key==='Enter')sendChat()"/>
+          <button class="chat-send" onclick="sendChat()">Enviar</button>
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-header"><div class="section-title">Sugerencias de conversación</div></div>
+      <div style="padding:14px 18px;display:flex;gap:8px;flex-wrap:wrap">
+        ${['¿Quién ingresa esta semana?','Soy Panda Bear, ¿quién eres?','¿Cuántos empleados hay en Koronet?','¿Qué mensajes tienes pendientes de aprobación?','Muéstrame los próximos ingresos'].map(s=>`<button class="act-btn" style="font-size:12px" onclick="setChat('${s}')">${s}</button>`).join('')}
+      </div>
+    </div>`;
+}
+
+function setChat(text) {
+  document.getElementById('chat-input').value = text;
+  sendChat();
+}
+
+async function sendChat() {
+  const input = document.getElementById('chat-input');
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+
+  const msgs = document.getElementById('chat-messages');
+  msgs.innerHTML += `<div class="chat-msg user">${text}</div>`;
+  msgs.innerHTML += `<div class="chat-msg assistant" id="thinking"><span class="spinner"></span> Pensando...</div>`;
+  msgs.scrollTop = msgs.scrollHeight;
+
+  try {
+    const r = await api('/agent/conversation', {method:'POST', body:JSON.stringify({message:text, sessionId:chatSession})});
+    document.getElementById('thinking').remove();
+    msgs.innerHTML += `<div class="chat-msg assistant">${r.reply.replace(/\n/g,'<br>')}</div>`;
+  } catch(e) {
+    document.getElementById('thinking').remove();
+    msgs.innerHTML += `<div class="chat-msg assistant" style="color:var(--red)">❌ Error: ${e.message}</div>`;
+  }
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+// ── MESSAGES ──────────────────────────────────────────────────────
+async function renderMessages() {
+  const c = document.getElementById('page-content');
+  try {
+    const msgs = await api('/agent/messages');
+    c.innerHTML = `
+      <div class="page-header"><div class="page-title">Messages</div><div class="page-sub">Todos los mensajes generados por el agente</div></div>
+      <div class="section">
+        <div class="section-header"><div class="section-title">Todos los mensajes <span style="color:var(--text3);font-weight:400">(${msgs.length})</span></div></div>
+        ${msgs.length===0?'<div class="empty"><div class="icon">📭</div>No hay mensajes todavía.</div>'
+          :renderMsgTable(msgs)}
+      </div>`;
+  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error cargando mensajes.</div></div>`; }
+}
+
+// ── HIRES ────────────────────────────────────────────────────────
+async function renderHires() {
+  const c = document.getElementById('page-content');
+  try {
+    const hires = await api('/agent/recent-hires');
+    c.innerHTML = `
+      <div class="page-header"><div class="page-title">Upcoming Hires</div><div class="page-sub">Próximos ingresos detectados en BambooHR — próximos 60 días</div></div>
+      <div class="section">
+        <div class="section-header"><div class="section-title">Próximos <span style="color:var(--text3);font-weight:400">(${hires.length})</span></div></div>
+        ${hires.length===0?'<div class="empty"><div class="icon">🎉</div>No hay ingresos próximos.</div>'
+          :`<table class="table"><thead><tr><th>Empleado</th><th>Cargo</th><th>Inicio</th><th>Manager</th><th>Idioma</th><th>Notif. Manager</th><th>Estado</th></tr></thead><tbody>
+          ${hires.map(h=>`<tr>
+            <td><div style="font-weight:600">${h.firstName} ${h.lastName}</div><div style="font-size:11px;color:var(--text3)">${h.workEmail||''}</div></td>
+            <td style="color:var(--text2)">${h.jobTitle||'—'}</td>
+            <td style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--teal)">${h.hireDate} <span style="color:var(--text3)">(${h.daysUntilHire}d)</span></td>
+            <td style="color:var(--text2)">${h.supervisor||'—'}</td>
+            <td><span class="badge ${h.language==='es'?'sent':'pending'}">${h.language==='es'?'🇪🇸 ES':'🇬🇧 EN'}</span></td>
+            <td style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text3)">${h.managerMessageDate||'—'}</td>
+            <td><span class="badge ${h.alreadyProcessed?'sent':'pending_approval'}">${h.alreadyProcessed?'✓ Listo':'⏳ Pendiente'}</span></td>
+          </tr>`).join('')}
+          </tbody></table>`}
+      </div>`;
+  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
+}
+
+// ── RUNS ─────────────────────────────────────────────────────────
+async function renderRuns() {
+  const c = document.getElementById('page-content');
+  try {
+    const runs = await api('/agent/runs');
+    c.innerHTML = `
+      <div class="page-header"><div class="page-title">Runs</div><div class="page-sub">Historial de ciclos de detección del agente</div></div>
+      <div class="section">
+        <div class="section-header"><div class="section-title">Historial <span style="color:var(--text3);font-weight:400">(${runs.length})</span></div></div>
+        ${runs.length===0?'<div class="empty"><div class="icon">⚡</div>No hay runs. Corre un sync para comenzar.</div>'
+          :`<table class="table"><thead><tr><th>ID</th><th>Inicio</th><th>Estado</th><th>Escaneados</th><th>Nuevos</th><th>Mensajes</th><th>Tipo</th></tr></thead><tbody>
+          ${runs.map(r=>`<tr>
+            <td style="font-family:'JetBrains Mono',monospace;color:var(--text3)">#${r.id}</td>
+            <td style="font-size:12px">${new Date(r.startedAt).toLocaleString()}</td>
+            <td>${badge(r.status==='completed'?'completed':r.status==='failed'?'failed':'running')}</td>
+            <td style="text-align:center">${r.employeesScanned}</td>
+            <td style="text-align:center;color:var(--teal);font-weight:600">${r.newEmployees}</td>
+            <td style="text-align:center">${r.messagesSent}</td>
+            <td><span class="badge ${r.dryRun?'skipped':'sent'}">${r.dryRun?'🔍 Dry':'🚀 Live'}</span></td>
+          </tr>`).join('')}
+          </tbody></table>`}
+      </div>`;
+  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
+}
+
+// ── IDENTITY ─────────────────────────────────────────────────────
+async function renderIdentity() {
+  const c = document.getElementById('page-content');
+  try {
+    const id = await api('/agent/identity');
+    c.innerHTML = `
+      <div class="page-header"><div class="page-title">Agent Identity</div><div class="page-sub">Quién es Panda Bear y qué lo gobierna</div></div>
+      <div class="identity-card">
+        <div style="font-size:36px;margin-bottom:8px">🐼</div>
+        <div class="id-name">${id.name}</div>
+        <div class="id-role">${id.role} · ${id.company} · v${id.version}</div>
+        <div class="id-section">
+          <div class="id-section-title">Propósito</div>
+          <div style="font-size:13.5px;line-height:1.6;color:var(--text2)">${id.purpose}</div>
+        </div>
+        <div class="id-section">
+          <div class="id-section-title">Optimización</div>
+          <div style="font-size:13.5px;color:var(--text2)">${id.optimization}</div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-header"><div class="section-title">Constitución — Reglas Absolutas</div></div>
+        <div style="padding:16px">
+          ${id.constitution.map(r=>`<div class="constitution-rule"><strong>[${r.code}]</strong> ${r.rule}</div>`).join('')}
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-header"><div class="section-title">Goals</div></div>
+        <div style="padding:16px">
+          ${id.goals.map(g=>`<div class="goal-item"><span class="goal-id">${g.id}</span><div style="font-size:13px">${g.description}</div></div>`).join('')}
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-header"><div class="section-title">Action Principle</div></div>
+        <div style="padding:16px">
+          <div style="display:flex;gap:0;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+            ${id.action_principle.flow.map((f,i)=>`<span style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 14px;font-size:13px;font-weight:600">${f}</span>${i<id.action_principle.flow.length-1?'<span style="margin:0 6px;color:var(--text3)">→</span>':''}`).join('')}
+          </div>
+          <div style="font-size:13px;color:var(--text2)">${id.action_principle.rule}</div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-header"><div class="section-title">Skills (${id.skills.length})</div></div>
+        <div style="padding:14px 16px">
+          ${id.skills.map(s=>`<span class="skill-pill">${s.name}<span style="color:var(--text3);font-weight:400;margin-left:4px">${s.category}</span></span>`).join('')}
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-header"><div class="section-title">Services (${id.services.length})</div></div>
+        <table class="table"><thead><tr><th>Servicio</th><th>Estado</th><th>Descripción</th></tr></thead><tbody>
+          ${id.services.map(s=>`<tr>
+            <td style="font-family:'JetBrains Mono',monospace;font-size:12px">${s.name}</td>
+            <td>${badge(s.status==='running'?'sent':s.status==='stopped'?'skipped':'failed')}</td>
+            <td style="color:var(--text2);font-size:12px">${s.description}</td>
+          </tr>`).join('')}
+        </tbody></table>
+      </div>`;
+  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
+}
+
+// ── MEMORY ───────────────────────────────────────────────────────
+async function renderMemory() {
+  const c = document.getElementById('page-content');
+  try {
+    const mem = await api('/agent/memory');
+    const lessons = await api('/agent/lessons');
+    c.innerHTML = `
+      <div class="page-header"><div class="page-title">Agent Memory</div><div class="page-sub">Lo que Panda Bear recuerda de cada onboarding</div></div>
+      <div class="section">
+        <div class="section-header"><div class="section-title">Memory Summary</div></div>
+        <div style="padding:16px">
+          <div class="memory-row">
+            ${Object.entries(mem).map(([k,v])=>`<div class="memory-stat"><div class="memory-stat-val">${v}</div><div class="memory-stat-label">${k}</div></div>`).join('')}
+          </div>
+        </div>
+      </div>
+      <div class="section">
+        <div class="section-header"><div class="section-title">Lessons Learned (${lessons.length})</div></div>
+        ${lessons.length===0?'<div class="empty"><div class="icon">📚</div>Aún no hay lecciones registradas. Cada onboarding completo genera aprendizaje.</div>'
+          :`<table class="table"><thead><tr><th>Empleado</th><th>País</th><th>Aprobados</th><th>Editados</th><th>Rechazados</th><th>Qué funcionó</th></tr></thead><tbody>
+          ${lessons.map(l=>`<tr>
+            <td style="font-weight:600">${l.employeeName}</td>
+            <td style="color:var(--text3)">${l.country||'—'}</td>
+            <td style="color:var(--green)">${l.messagesApproved}</td>
+            <td style="color:var(--yellow)">${l.messagesEdited}</td>
+            <td style="color:var(--red)">${l.messagesRejected}</td>
+            <td style="font-size:12px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.whatWorked||'—'}</td>
+          </tr>`).join('')}
+          </tbody></table>`}
+      </div>`;
+  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
+}
+
+// ── DECISIONS ────────────────────────────────────────────────────
+async function renderDecisions() {
+  const c = document.getElementById('page-content');
+  try {
+    const decs = await api('/agent/decisions');
+    c.innerHTML = `
+      <div class="page-header"><div class="page-title">Decision History</div><div class="page-sub">Cada decisión que Panda Bear tomó y por qué</div></div>
+      <div class="section">
+        <div class="section-header"><div class="section-title">Decisiones recientes <span style="color:var(--text3);font-weight:400">(${decs.length})</span></div></div>
+        ${decs.length===0?'<div class="empty"><div class="icon">📋</div>No hay decisiones registradas todavía.</div>'
+          :`<table class="table"><thead><tr><th>Skill</th><th>Decisión</th><th>Razonamiento</th><th>Confianza</th><th>Fecha</th></tr></thead><tbody>
+          ${decs.map(d=>`<tr>
+            <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--teal)">${d.skillName}</td>
+            <td style="font-size:12px;font-weight:600;max-width:160px">${d.decision}</td>
+            <td style="font-size:12px;color:var(--text2);max-width:240px">${d.reasoning||'—'}</td>
+            <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:12px">${Math.round((d.confidence||1)*100)}%</td>
+            <td style="color:var(--text3);font-size:11px;font-family:'JetBrains Mono',monospace">${new Date(d.createdAt).toLocaleString()}</td>
+          </tr>`).join('')}
+          </tbody></table>`}
+      </div>`;
+  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
+}
+
+// ── SERVICES ─────────────────────────────────────────────────────
+async function renderServices() {
+  const c = document.getElementById('page-content');
+  try {
+    const health = await api('/agent/kernel/health');
+    const metrics = await api('/agent/kernel/metrics');
+    c.innerHTML = `
+      <div class="page-header"><div class="page-title">Services & Kernel</div><div class="page-sub">Runtime del agente — todos los servicios bajo control del Kernel</div></div>
+      <div class="section">
+        <div class="section-header"><div class="section-title">Kernel Status</div></div>
+        <div style="padding:16px">
+          <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px">
+            <div class="memory-stat"><div class="memory-stat-val" style="color:${health.kernel.status==='healthy'?'var(--green)':'var(--yellow)'}">${health.kernel.status}</div><div class="memory-stat-label">Kernel</div></div>
+            <div class="memory-stat"><div class="memory-stat-val">${health.kernel.totalServices}</div><div class="memory-stat-label">Total Services</div></div>
+            <div class="memory-stat"><div class="memory-stat-val" style="color:var(--green)">${health.kernel.healthyServices}</div><div class="memory-stat-label">Healthy</div></div>
+          </div>
+          <div style="font-size:12px;color:var(--text3)">Kernel arrancó: ${health.kernel.startedAt ? new Date(health.kernel.startedAt).toLocaleString() : 'Desconocido'}</div>
+        </div>
+      </div>
+      ${Object.entries(health.services).map(([name,svc])=>`
+        <div class="section">
+          <div class="section-header">
+            <div class="section-title">${name} <span style="color:var(--text3);font-weight:400;font-size:12px;margin-left:8px">start() · stop() · health() · heartbeat() · recover() · metrics()</span></div>
+            ${badge(svc.status==='running'?'sent':svc.status==='stopped'?'skipped':'failed')}
+          </div>
+          <div style="padding:14px 18px;font-size:13px">
+            <div style="display:flex;gap:20px;flex-wrap:wrap;color:var(--text2)">
+              <div>Arrancó: <strong>${svc.startedAt?new Date(svc.startedAt).toLocaleString():'—'}</strong></div>
+              <div>Heartbeats: <strong>${svc.heartbeatCount||0}</strong></div>
+              ${svc.employeeCount!==undefined?`<div>Empleados: <strong>${svc.employeeCount}</strong></div>`:''}
+              ${svc.messagesSent!==undefined?`<div>Mensajes enviados: <strong>${svc.messagesSent}</strong></div>`:''}
+              ${svc.workspace?`<div>Workspace: <strong>${svc.workspace}</strong></div>`:''}
+            </div>
+            ${svc.errors&&svc.errors.length>0?`<div style="margin-top:8px;color:var(--red);font-size:12px">Errores: ${svc.errors.join(', ')}</div>`:''}
+          </div>
+        </div>`).join('')}
+      <div class="btn-row" style="margin-top:8px">
+        <button class="btn-secondary" onclick="heartbeat()">💓 Send Heartbeat</button>
+      </div>`;
+  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
+}
+
+// ── OPS CENTER ───────────────────────────────────────────────────
+async function renderOpsCenter() {
+  const c = document.getElementById('page-content');
+  try {
+    const ops = await api('/agent/ops-center');
+    const color = ops.systemHealth==='green'?'green':ops.systemHealth==='yellow'?'yellow':'red';
+    const healthLabel = {green:'Sistema operacional',yellow:'Sistema degradado',red:'Fallo crítico'}[ops.systemHealth]||ops.systemHealth;
+
+    c.innerHTML = `
+      <div class="page-header"><div class="page-title">Operations Center</div><div class="page-sub">Estado del sistema en tiempo real · ${new Date(ops.timestamp).toLocaleString()}</div></div>
+      <div class="health-banner ${color}">
+        <div class="health-dot ${color}"></div>
+        <div><div class="health-title" style="color:var(--${color==='green'?'green':color==='yellow'?'yellow':'red'})">${healthLabel}</div>
+        <div class="health-sub">${ops.issues&&ops.issues.length>0?ops.issues.join(' · '):'Todos los servicios responden correctamente'}</div></div>
+      </div>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Pending Batches</div><div class="stat-value" style="color:${ops.pendingBatches>0?'var(--purple)':'var(--text)'}">${ops.pendingBatches}</div></div>
+        <div class="stat-card"><div class="stat-label">Total Sent</div><div class="stat-value" style="color:var(--green)">${ops.totalSent||0}</div></div>
+        <div class="stat-card"><div class="stat-label">Total Failed</div><div class="stat-value" style="color:${ops.totalFailed>0?'var(--red)':'var(--text)'}">${ops.totalFailed||0}</div></div>
+        <div class="stat-card"><div class="stat-label">Active Incidents</div><div class="stat-value" style="color:${ops.activeIncidents>0?'var(--red)':'var(--text)'}">${ops.activeIncidents||0}</div></div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:16px">
+        ${opsServiceCard('BambooHR',ops.bamboo)}
+        ${opsServiceCard('Slack',ops.slack)}
+        ${opsServiceCard('Groq AI',ops.groq)}
+      </div>
+      ${ops.slack&&ops.slack.scopes?renderScopeAudit(ops.slack.scopes):''}
+      <div class="section">
+        <div class="section-header"><div class="section-title">Kernel</div></div>
+        <div style="padding:14px 18px;font-size:13px;color:var(--text2)">
+          <div style="display:flex;gap:20px;flex-wrap:wrap">
+            <div>Servicios: <strong>${ops.kernel&&ops.kernel.kernel?ops.kernel.kernel.totalServices:'—'}</strong></div>
+            <div>Saludables: <strong style="color:var(--green)">${ops.kernel&&ops.kernel.kernel?ops.kernel.kernel.healthyServices:'—'}</strong></div>
+            <div>Estado: <strong>${ops.kernel&&ops.kernel.kernel?ops.kernel.kernel.status:'—'}</strong></div>
+            <div>Arrancó: <strong>${ops.kernel&&ops.kernel.kernel&&ops.kernel.kernel.startedAt?new Date(ops.kernel.kernel.startedAt).toLocaleString():'—'}</strong></div>
+          </div>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn-secondary" onclick="heartbeat()">💓 Send Heartbeat</button>
+        <button class="btn-secondary" onclick="nav('incidents',document.querySelectorAll('.nav-item')[14])">🚨 Ver Incidents</button>
+        <button class="btn-secondary" onclick="nav('audit',document.querySelectorAll('.nav-item')[16])">🎯 Production Audit</button>
+      </div>`;
+  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
+}
+
+function opsServiceCard(name, svc) {
+  if(!svc) return `<div class="section"><div style="padding:14px 18px;font-size:13px;color:var(--text3)">${name}: sin datos</div></div>`;
+  const ok = svc.connected;
+  return `<div class="section">
+    <div class="section-header"><div class="section-title" style="display:flex;align-items:center;gap:8px"><div class="dot ${ok?'green':'red'}"></div>${name}</div></div>
+    <div style="padding:12px 18px;font-size:13px;color:var(--text2)">
+      ${svc.workspace?`<div>Workspace: <strong>${svc.workspace}</strong></div>`:''}
+      ${svc.employeeCount!==undefined?`<div>Empleados: <strong>${svc.employeeCount}</strong></div>`:''}
+      ${svc.model?`<div>Modelo: <strong>${svc.model}</strong></div>`:''}
+      ${svc.error?`<div style="color:var(--red);font-size:12px;margin-top:4px">⚠ ${svc.error}</div>`:''}
+      ${!ok&&!svc.error?'<div style="color:var(--red)">No conectado</div>':''}
+    </div>
+  </div>`;
+}
+
+function renderScopeAudit(scopes) {
+  if(!scopes) return '';
+  const missing = scopes.missing||{};
+  const present = scopes.present||{};
+  if(Object.keys(missing).length===0&&Object.keys(present).length===0) return '';
+  return `<div class="section" style="margin-bottom:16px">
+    <div class="section-header">
+      <div class="section-title">Slack OAuth Scopes</div>
+      <span class="${scopes.complete?'badge sent':'badge failed'}">${scopes.complete?'✓ Completo':'✗ Faltan permisos'}</span>
+    </div>
+    <div class="scope-grid">
+      ${Object.entries(present).map(([k,desc])=>`<div class="scope-card ok"><div class="scope-name">✓ ${k}</div><div class="scope-desc">${desc}</div></div>`).join('')}
+      ${Object.entries(missing).map(([k,v])=>`<div class="scope-card ${v.critical?'miss-crit':'miss'}"><div class="scope-name">✗ ${k}${v.critical?' <span style="color:var(--red)">CRÍTICO</span>':''}</div><div class="scope-desc">${v.desc}</div><div class="scope-feature">${v.feature}</div></div>`).join('')}
+    </div>
+    ${scopes.fixSteps&&scopes.fixSteps.length>0?`<div style="padding:0 16px 16px"><div style="background:rgba(220,38,38,.06);border:1px solid rgba(220,38,38,.2);border-radius:8px;padding:12px 14px;font-size:12px;font-family:'JetBrains Mono',monospace;line-height:1.9;color:var(--text2)">${scopes.fixSteps.join('<br>')}</div></div>`:''}
+  </div>`;
+}
+
+// ── INCIDENTS ────────────────────────────────────────────────────
+async function renderIncidents() {
+  const c = document.getElementById('page-content');
+  try {
+    const [active, history] = await Promise.all([api('/agent/incidents'), api('/agent/incidents/history')]);
+    c.innerHTML = `
+      <div class="page-header"><div class="page-title">Incidents</div><div class="page-sub">Cada error clasificado, explicado, y con pasos de resolución</div></div>
+      ${active.length===0
+        ? '<div class="section"><div class="empty"><div class="icon">✅</div>Sin incidentes activos. Sistema operacional.</div></div>'
+        : `<div class="section"><div class="section-header"><div class="section-title" style="color:var(--red)">⚠ Incidentes Activos (${active.length})</div></div><div style="padding:16px">
+          ${active.map(inc=>incidentCard(inc,true)).join('')}
+        </div></div>`}
+      <div class="section">
+        <div class="section-header"><div class="section-title">Historial <span style="color:var(--text3);font-weight:400">(${history.length})</span></div></div>
+        ${history.length===0?'<div class="empty"><div class="icon">📜</div>Sin historial de incidentes.</div>'
+          :`<table class="table"><thead><tr><th>ID</th><th>Servicio</th><th>Tipo</th><th>Recoverable</th><th>Recovered</th><th>Resuelto</th><th>Fecha</th></tr></thead><tbody>
+          ${history.map(i=>`<tr>
+            <td style="font-family:'JetBrains Mono',monospace;color:var(--text3)">#${i.id}</td>
+            <td style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--teal)">${i.service}</td>
+            <td><span class="badge ${i.type==='missing_scope'||i.type==='auth_failure'?'failed':'pending'}">${i.type}</span></td>
+            <td style="text-align:center">${i.recoverable?'<span style="color:var(--green)">✓</span>':'<span style="color:var(--red)">✗</span>'}</td>
+            <td style="text-align:center">${i.recovered?'<span style="color:var(--green)">✓</span>':'—'}</td>
+            <td style="text-align:center">${i.resolved?'<span style="color:var(--green)">✓</span>':'<span style="color:var(--red)">✗</span>'}</td>
+            <td style="color:var(--text3);font-size:11px;font-family:'JetBrains Mono',monospace">${new Date(i.createdAt).toLocaleString()}</td>
+          </tr>`).join('')}
+          </tbody></table>`}
+      </div>`;
+  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
+}
+
+function incidentCard(inc, showResolve) {
+  const typeColor = inc.recoverable?'var(--yellow)':'var(--red)';
+  return `<div class="incident-card ${inc.recoverable?'recoverable':'unresolved'}">
+    <div class="incident-type" style="color:${typeColor}">${inc.recoverable?'⟳':'⚠'} ${inc.type} · ${inc.service}</div>
+    <div class="incident-cause">${inc.cause||'Error sin clasificar'}</div>
+    ${inc.solution?`<div class="incident-steps">${inc.solution.replace(/\n/g,'<br>')}</div>`:''}
+    <div style="display:flex;gap:8px;margin-top:10px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:11px;color:var(--text3);font-family:'JetBrains Mono',monospace">${new Date(inc.createdAt).toLocaleString()}</span>
+      ${showResolve?`<button class="act-btn" onclick="resolveIncident(${inc.id})">✓ Marcar Resuelto</button>`:''}
+    </div>
+  </div>`;
+}
+
+async function resolveIncident(id) {
+  try {
+    await api(`/agent/incidents/${id}/resolve`,{method:'POST'});
+    showToast('✅ Incidente marcado como resuelto.');
+    render(currentPage);
+  } catch(e) { showToast('❌ Error: '+e.message); }
+}
+
+// ── EXECUTION HISTORY ────────────────────────────────────────────
+async function renderExecution() {
+  const c = document.getElementById('page-content');
+  try {
+    const msgs = await api('/agent/execution-history');
+    const delivered = msgs.filter(m=>m.status==='delivered'||m.status==='sent').length;
+    const failed = msgs.filter(m=>m.status==='failed').length;
+    c.innerHTML = `
+      <div class="page-header"><div class="page-title">Execution History</div><div class="page-sub">Audit trail completo de cada envío — cada éxito, cada fallo</div></div>
+      <div class="stats-grid">
+        <div class="stat-card"><div class="stat-label">Total Registros</div><div class="stat-value">${msgs.length}</div></div>
+        <div class="stat-card"><div class="stat-label">Enviados</div><div class="stat-value" style="color:var(--green)">${delivered}</div></div>
+        <div class="stat-card"><div class="stat-label">Fallidos</div><div class="stat-value" style="color:${failed>0?'var(--red)':'var(--text)'}">${failed}</div></div>
+        <div class="stat-card"><div class="stat-label">Pendientes</div><div class="stat-value" style="color:var(--purple)">${msgs.filter(m=>m.status==='pending_approval'||m.status==='pending').length}</div></div>
+      </div>
+      <div class="section">
+        <div class="section-header"><div class="section-title">Registro de Entregas</div></div>
+        ${msgs.length===0?'<div class="empty"><div class="icon">📦</div>Sin registros todavía. Corre un sync y aprueba un batch.</div>'
+          :`<table class="table"><thead><tr><th>Empleado</th><th>Tipo</th><th>Estado</th><th>Creado</th><th>Entregado</th><th>Batch</th><th>Intentos</th><th>Error</th></tr></thead><tbody>
+          ${msgs.map(m=>`<tr>
+            <td><div style="font-weight:600">${m.employeeName}</div><div style="font-size:11px;color:var(--text3)">${m.employeeJobTitle||''}</div></td>
+            <td style="font-size:12px;color:var(--teal)">${TYPE_LABEL[m.messageType]||m.messageType}</td>
+            <td>${badge(m.status)}</td>
+            <td style="color:var(--text3);font-size:11px;font-family:'JetBrains Mono',monospace">${m.createdAt?new Date(m.createdAt).toLocaleString():'—'}</td>
+            <td style="color:var(--text3);font-size:11px;font-family:'JetBrains Mono',monospace">${m.sentAt||m.deliveredAt?new Date(m.sentAt||m.deliveredAt).toLocaleString():'—'}</td>
+            <td style="color:var(--text3);font-size:11px">${m.batchId?'#'+m.batchId:'—'}</td>
+            <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:12px">${m.retries||0}</td>
+            <td style="font-size:11px;color:var(--red);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.deliveryError||'—'}</td>
+          </tr>`).join('')}
+          </tbody></table>`}
+      </div>`;
+  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
+}
+
+// ── PRODUCTION AUDIT ─────────────────────────────────────────────
+async function renderProdAudit() {
+  const c = document.getElementById('page-content');
+  try {
+    c.innerHTML = '<div class="loading"><span class="spinner"></span> Ejecutando auditoría de producción...</div>';
+    const audit = await api('/agent/production-audit');
+    const score = audit.overallScore||0;
+    const scoreColor = score>=80?'var(--green)':score>=60?'var(--yellow)':'var(--red)';
+
+    c.innerHTML = `
+      <div class="page-header"><div class="page-title">Production Readiness Audit</div><div class="page-sub">Scored honestamente. Sin indulgencia.</div></div>
+      <div class="health-banner ${score>=80?'green':score>=60?'yellow':'red'}">
+        <div>
+          <div class="health-title" style="color:${scoreColor};font-size:40px;font-family:'JetBrains Mono',monospace">${score}/100</div>
+          <div style="font-size:14px;font-weight:700;margin-top:4px">${audit.recommendation||''}</div>
+          <div style="font-size:12px;margin-top:4px;opacity:.75">${audit.productionReady?'✓ Listo para producción':'✗ No listo para producción'}</div>
+        </div>
+      </div>
+      ${audit.criticalBlockers&&audit.criticalBlockers.length>0?`
+        <div class="section" style="margin-bottom:16px;border-color:rgba(220,38,38,.3)">
+          <div class="section-header" style="background:rgba(220,38,38,.05)"><div class="section-title" style="color:var(--red)">⛔ Bloqueadores Críticos (${audit.criticalBlockers.length})</div></div>
+          <div style="padding:14px 18px">
+            ${audit.criticalBlockers.map(b=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px"><span style="color:var(--red);font-size:16px">✗</span><div style="font-size:13px">${b}</div></div>`).join('')}
+          </div>
+        </div>` : ''}
+      ${audit.dependsOnFounder&&audit.dependsOnFounder.length>0?`
+        <div class="section" style="margin-bottom:16px;border-color:rgba(217,119,6,.3)">
+          <div class="section-header" style="background:rgba(217,119,6,.05)"><div class="section-title" style="color:var(--yellow)">⚡ Depende del Fundador (${audit.dependsOnFounder.length})</div></div>
+          <div style="padding:14px 18px">
+            ${audit.dependsOnFounder.map(b=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px"><span style="color:var(--yellow);font-size:14px">→</span><div style="font-size:13px">${b}</div></div>`).join('')}
+          </div>
+        </div>` : ''}
+      <div class="section">
+        <div class="section-header"><div class="section-title">8 Dimensiones</div></div>
+        <div class="audit-grid">
+          ${Object.entries(audit.dimensions||{}).map(([key,dim])=>{
+            const s=dim.score||0;
+            const cl=s>=80?'var(--green)':s>=60?'var(--yellow)':'var(--red)';
+            return `<div class="audit-card">
+              <div class="audit-label">${key.replace(/_/g,' ')}</div>
+              <div class="audit-score" style="color:${cl}">${s}</div>
+              <div class="audit-bar"><div class="audit-fill" style="width:${s}%;background:${cl}"></div></div>
+              ${dim.issues&&dim.issues.length>0?`<div class="audit-issues">${dim.issues.slice(0,2).map(i=>`• ${i}`).join('<br>')}</div>`:''}
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error ejecutando auditoría: ${e.message}</div></div>`; }
+}
+
+// ── ACTIONS ──────────────────────────────────────────────────────
+async function runSync(dry) {
+  const btn = document.getElementById(dry?'dry-btn':'sync-btn');
+  if(btn){btn.disabled=true;btn.innerHTML='<span class="spinner"></span> Detectando...';}
+  try {
+    const r = await api('/agent/sync',{method:'POST',body:JSON.stringify({dryRun:dry,lookbackDays:60})});
+    showToast(`✅ ${r.agentNote||`${r.newEmployees} nuevo(s), ${r.messagesSent} mensaje(s) preparados.`}`,6000);
+    setTimeout(()=>render(currentPage),800);
+  } catch(e) {
+    showToast('❌ Sync falló: '+e.message,5000);
+    if(btn){btn.disabled=false;btn.innerHTML=dry?'🔍 Dry Run':'▶ Run Sync';}
+  }
+}
+
+async function approveBatch(id) {
+  try{await api(`/agent/batches/${id}/approve`,{method:'POST'});showToast('✅ Aprobado!');render(currentPage);}
+  catch(e){showToast('❌ Error: '+e.message);}
+}
+async function rejectBatch(id) {
+  try{await api(`/agent/batches/${id}/reject`,{method:'POST'});showToast('🚫 Rechazado.');render(currentPage);}
+  catch(e){showToast('❌ Error: '+e.message);}
+}
+async function reviewBatch(id) {
+  try {
+    const batch = await api(`/agent/batches/${id}`);
+    const msgs = batch.messages||[];
+    const typeLabel={employee_email:'📧 Correo Empleado',manager_slack:'💬 Slack Manager',bienvenidas_slack:'🎉 #Koronet'};
+    document.getElementById('modal-content').innerHTML=`
+      <div class="modal-title">👁 ${batch.employeeName||'Batch #'+id} — ${msgs.length} mensaje(s)</div>
+      ${msgs.map(m=>`<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px">
+        <div style="display:flex;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px">
+          <span style="font-weight:700">${m.employeeName}</span>
+          <span style="font-size:12px;color:var(--teal);font-weight:600">${typeLabel[m.messageType]||m.messageType}</span>
+        </div>
+        <div class="msg-preview">${(m.messageContent||'').replace(/\n/g,'<br>')}</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          <button class="act-btn" onclick="openEdit(${m.id},\`${esc(m.messageContent)}\`,'${m.employeeName}')">✏️ Editar</button>
+          <button class="act-btn" onclick="testDm(${m.id})">🔔 Test DM</button>
+          <button class="act-btn" onclick="skipMsg(${m.id})">⏭ Saltar</button>
+        </div>
+      </div>`).join('')}
+      <div class="modal-actions">
+        <button class="btn-secondary" style="padding:8px 16px;font-size:13px" onclick="closeModal()">Cerrar</button>
+        <button class="btn-primary" style="padding:8px 16px;font-size:13px" onclick="approveBatch(${id});closeModal()">✅ Aprobar Todos</button>
+      </div>`;
+    document.getElementById('modal').style.display='flex';
+  } catch(e){showToast('❌ Error: '+e.message);}
+}
+
+function openEdit(id,content,name){
+  document.getElementById('modal-content').innerHTML=`
+    <div class="modal-title">✏️ Editar — ${name}</div>
+    <div style="margin-bottom:8px;font-size:12px;color:var(--text3)">Mensaje actual:</div>
+    <div class="msg-preview">${content}</div>
+    <div style="margin-bottom:8px;font-size:12px;color:var(--text3)">Editar directamente:</div>
+    <textarea id="edit-content">${content}</textarea>
+    <div style="margin-bottom:8px;font-size:12px;color:var(--text3)">O dar instrucción a la IA (Panda aprende de esto):</div>
+    <textarea id="edit-feedback" style="min-height:70px" placeholder="Ej: hazlo más cálido y más corto"></textarea>
+    <div class="modal-actions">
+      <button class="btn-secondary" style="padding:8px 16px;font-size:13px" onclick="closeModal()">Cancelar</button>
+      <button class="btn-primary" style="padding:8px 16px;font-size:13px" onclick="submitEdit(${id})">Guardar</button>
+    </div>`;
+  document.getElementById('modal').style.display='flex';
+}
+
+async function submitEdit(id){
+  const content=document.getElementById('edit-content').value;
+  const feedback=document.getElementById('edit-feedback').value;
+  const body=feedback.trim()?{feedback}:{content};
+  try{await api(`/agent/messages/${id}/edit`,{method:'POST',body:JSON.stringify(body)});showToast('✅ Actualizado!');closeModal();render(currentPage);}
+  catch(e){showToast('❌ Error: '+e.message);}
+}
+
+async function testDm(id){
+  showToast('🔔 Enviando test DM...',2000);
+  try{const r=await api(`/agent/messages/${id}/test-dm`,{method:'POST'});showToast(r.delivered?'✅ Test DM enviado!':'❌ '+r.error,4000);}
+  catch(e){showToast('❌ Error: '+e.message);}
+}
+
+async function skipMsg(id){
+  try{await api(`/agent/messages/${id}/skip`,{method:'POST'});showToast('⏭ Saltado.');render(currentPage);}
+  catch(e){showToast('❌ Error: '+e.message);}
+}
+
+function viewMsg(id,content,name,status){
+  document.getElementById('modal-content').innerHTML=`
+    <div class="modal-title">💬 ${name}</div><div style="margin-bottom:10px">${badge(status)}</div>
+    <div class="msg-preview">${content.replace(/\n/g,'<br>')}</div>
+    <div class="modal-actions"><button class="btn-secondary" style="padding:8px 16px;font-size:13px" onclick="closeModal()">Cerrar</button></div>`;
+  document.getElementById('modal').style.display='flex';
+}
+
+async function heartbeat(){
+  try{const r=await api('/agent/kernel/heartbeat',{method:'POST'});showToast('💓 Heartbeat OK — '+JSON.stringify(r).slice(0,80));}
+  catch(e){showToast('❌ Heartbeat falló: '+e.message);}
+}
+
+function closeModal(e){
+  if(!e||e.target===document.getElementById('modal'))
+    document.getElementById('modal').style.display='none';
+}
+
+// Start
+render('brief');
+</script>
+</body>
+</html>
