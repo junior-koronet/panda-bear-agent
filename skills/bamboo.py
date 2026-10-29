@@ -12,8 +12,8 @@ BAMBOO_API_KEY = os.getenv("BAMBOO_API_KEY")
 BAMBOO_SUBDOMAIN = os.getenv("BAMBOO_SUBDOMAIN", "koronet")
 
 ALL_FIELDS = [
-    "firstName", "lastName", "jobTitle", "department", "hireDate",
-    "workEmail", "mobilePhone", "supervisor", "location", "division",
+    "firstName", "lastName", "preferredName", "jobTitle", "department", "hireDate",
+    "workEmail", "mobilePhone", "supervisor", "supervisorEId", "location", "division",
     "employmentHistoryStatus", "employeeNumber", "country", "state",
     "city", "gender", "nationality",
 ]
@@ -56,27 +56,110 @@ def get_employee_details(employee_id: str) -> dict:
         return {}
 
 
-def get_employee_photo(employee_id: str) -> bytes | None:
+def get_job_info_table(employee_id: str) -> list:
+    """
+    "Job Information" (manager/reportsTo, title, department, division,
+    location) is a BambooHR TABLE with effective-dated rows — the standard
+    employee/report endpoints only return whichever row is effective TODAY.
+    For a hire who hasn't started yet, that row is dated in the future, so
+    those endpoints silently return null for all of it, even though the
+    data is right there in BambooHR's UI. This reads the full table
+    (all rows, any date) instead.
+    """
+    url = f"https://api.bamboohr.com/api/gateway.php/{BAMBOO_SUBDOMAIN}/v1/employees/{employee_id}/tables/jobInfo"
     try:
-        url = f"https://api.bamboohr.com/api/gateway.php/{BAMBOO_SUBDOMAIN}/v1/employees/{employee_id}/files/view/"
         r = requests.get(url, auth=(BAMBOO_API_KEY, "x"), headers={"Accept": "application/json"}, timeout=15)
-        if not r.ok:
-            return None
-        categories = r.json().get("categories", [])
-        photo_file_id = None
-        for cat in categories:
-            if cat.get("name") == "Employee Uploads":
-                for f in cat.get("files", []):
-                    if f.get("name", "").lower().endswith((".png", ".jpg", ".jpeg")):
-                        photo_file_id = f.get("id")
-                        break
-        if not photo_file_id:
-            return None
-        dl_url = f"https://api.bamboohr.com/api/gateway.php/{BAMBOO_SUBDOMAIN}/v1/employees/{employee_id}/files/{photo_file_id}/"
-        dl = requests.get(dl_url, auth=(BAMBOO_API_KEY, "x"), timeout=15)
-        return dl.content if dl.ok else None
+        return r.json() if r.ok else []
+    except Exception:
+        return []
+
+
+def find_employee_id_by_name(full_name: str) -> str:
+    """
+    Matches a 'Firstname Lastname' display string — like the jobInfo
+    table's reportsTo value — back to an employee ID via the directory.
+    """
+    if not full_name:
+        return ""
+    target = full_name.strip().lower()
+    for e in _bamboo_report(["firstName", "lastName"]):
+        candidate = f"{e.get('firstName', '')} {e.get('lastName', '')}".strip().lower()
+        if candidate == target:
+            return str(e.get("id", ""))
+    return ""
+
+
+def resolve_manager_first_name(supervisor_eid: str, fallback_display_name: str = "") -> str:
+    """
+    Resolves the manager's actual preferred (or first) name for greetings.
+    Prefers a real lookup by employee ID over parsing the display string —
+    BambooHR's legacy "supervisor" field comes as "Lastname, Firstname",
+    while the "Reporting to" table field comes as "Firstname Lastname" —
+    naively splitting either one the wrong way gives the LASTNAME, not a
+    usable greeting name.
+    """
+    if not supervisor_eid and fallback_display_name:
+        supervisor_eid = find_employee_id_by_name(fallback_display_name)
+
+    if supervisor_eid:
+        details = get_employee_details(supervisor_eid)
+        name = details.get("preferredName") or details.get("firstName")
+        if name:
+            return name
+
+    if fallback_display_name:
+        if "," in fallback_display_name:
+            _, _, first_part = fallback_display_name.partition(",")
+            first_part = first_part.strip()
+            if first_part:
+                return first_part
+        return fallback_display_name.split()[0]
+
+    return ""
+
+
+def get_employee_photo(employee_id: str) -> bytes | None:
+    """
+    Uses BambooHR's dedicated employee-photo endpoint — NOT the generic
+    "Employee Uploads" file category, which is a grab-bag that can contain
+    ID/passport scans, contracts, and other onboarding paperwork alongside
+    an actual profile photo. Grabbing "the first image file" out of that
+    folder previously picked up a passport scan for at least one employee
+    (whatever file sorts first, by name, in that category) — this endpoint
+    is BambooHR's own concept of "this person's profile photo" and nothing
+    else can end up there.
+    """
+    try:
+        url = f"https://api.bamboohr.com/api/gateway.php/{BAMBOO_SUBDOMAIN}/v1/employees/{employee_id}/photo/original"
+        r = requests.get(url, auth=(BAMBOO_API_KEY, "x"), timeout=15)
+        return r.content if r.ok and r.content else None
     except Exception:
         return None
+
+
+def update_employee_fields(employee_id: str, fields: dict) -> tuple[bool, str]:
+    """
+    Updates one or more fields on an employee record (e.g. {"preferredName": "Dan Giraldo"}).
+    Returns (success, message) rather than raising, so bulk-update callers can
+    keep going past individual failures and report a clean per-row result.
+
+    "Connection: close" is required here: BambooHR's write endpoint (fronted by
+    an APISIX gateway) silently 401s every request after the first one sent
+    over a kept-alive connection — reads are unaffected, only POSTs. Forcing a
+    fresh TCP connection per call avoids it.
+    """
+    url = f"https://api.bamboohr.com/api/gateway.php/{BAMBOO_SUBDOMAIN}/v1/employees/{employee_id}"
+    try:
+        r = requests.post(
+            url, auth=(BAMBOO_API_KEY, "x"),
+            headers={"Accept": "application/json", "Content-Type": "application/json", "Connection": "close"},
+            json=fields, timeout=15,
+        )
+        if r.ok:
+            return True, f"HTTP {r.status_code}"
+        return False, f"HTTP {r.status_code}: {r.text[:300]}"
+    except Exception as e:
+        return False, str(e)
 
 
 class ReadBambooSkill(Skill):

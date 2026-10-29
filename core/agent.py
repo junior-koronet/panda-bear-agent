@@ -7,8 +7,10 @@ The dashboard never thinks for itself.
 
 import os
 import json
+import re
 from datetime import datetime
-from groq import Groq
+from types import SimpleNamespace
+from groq import Groq, BadRequestError as GroqBadRequestError, RateLimitError as GroqRateLimitError
 
 from core.identity import get_full_identity, check_constitution, CONSTITUTION
 from core.memory import AgentMemory
@@ -16,14 +18,209 @@ from core.kernel import ServiceKernel
 
 from skills.country_rules import CountryRulesSkill
 from skills.business_calendar import BusinessCalendarSkill
-from skills.bamboo import DetectEmployeesSkill, ReadBambooSkill, get_employee_details, get_employee_photo
+from skills.bamboo import DetectEmployeesSkill, ReadBambooSkill, get_employee_details, get_employee_photo, resolve_manager_first_name, get_job_info_table
 from skills.generate_content import GenerateEmailSkill, GenerateSlackManagerSkill, GenerateSlackBienvenidaSkill, RefineContentSkill
 from skills.image_generation import GenerateImageSkill
 from skills.approval_workflow import ApprovalWorkflowSkill
+from skills.calendar_skill import ListCalendarEventsSkill, CreateCalendarEventSkill
+from skills.email_skill import ListPendingEmailsSkill, SearchEmailsSkill, ListEmailsNeedingReplySkill, DraftEmailSkill
+from skills.meeting_notes_skill import CreateSummaryDocSkill, CreateSummarySlidesSkill, SummarizeTranscriptSkill
 
 from db.schema import get_db
 
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY")) if os.getenv("GROQ_API_KEY") else None
+
+# Only this Slack user may trigger the personal-assistant skills (calendar/email).
+# Checked both at the routing layer (main.py) and again here as defense in depth.
+JUNIOR_SLACK_ID = os.getenv("JUNIOR_SLACK_ID", "")
+
+PERSONAL_SYSTEM_PROMPT = """Eres Panda Bear 🐼, actuando como el asistente personal privado de Junior (Koronet).
+Solo Junior habla contigo en este modo — nunca se activa para nadie más.
+
+Herramientas disponibles:
+- list_calendar_events: consulta o BUSCA en su calendario en un rango de fechas (por defecto hoy). Acepta `query` (filtra por texto en el título) y `attendee_status` (filtra por si algún invitado respondió accepted/declined/needsAction/tentative) — úsalos cuando haya varios eventos parecidos en un día (ej. "¿quién canceló las citas de X el 12 de agosto?") en vez de traer todo sin filtrar y adivinar.
+- create_calendar_event: crea un evento. Si tiene invitados, el sistema SIEMPRE pide confirmación explícita a Junior antes de enviar la invitación — tú solo debes llamar la herramienta con los datos, nunca inventar que ya se envió.
+- list_pending_emails: correos no leídos en la bandeja de entrada.
+- search_emails: búsqueda libre en Gmail con operadores (is:unread, is:starred, from:, after:YYYY/MM/DD, before:YYYY/MM/DD, newer_than:7d, -from:me, subject:, etc.) — úsala para cualquier consulta de correo que no sea simplemente "no leídos".
+- list_emails_needing_reply: correos donde el último mensaje del hilo no lo envió Junior (le escribieron y no ha respondido).
+- draft_email: redacta el texto de un correo para que Junior lo copie y lo envíe — no lo envías tú.
+- join_meeting: únete ahora mismo a una reunión de Meet. SOLO se usa cuando Junior lo pide explícitamente — nunca por tu cuenta, nunca de forma proactiva. Si se refiere a una reunión de su calendario, primero usa list_calendar_events para encontrar su meetLink/eventId.
+- leave_meeting: sal de la llamada en la que estás conectado.
+- meeting_status: consulta si sigues conectado a una llamada.
+
+Puedes pensar en varios pasos: llama las herramientas que necesites, una tras otra, revisando cada resultado antes de decidir si necesitas otra o si ya puedes responder. Por ejemplo, si te piden un reporte o resumen de la semana, junta calendario y/o correos con las herramientas y luego redacta tú la síntesis — no hay una herramienta de "generar reporte", el reporte lo escribes tú a partir de datos reales. Si una búsqueda inicial trae demasiados resultados o no encuentra lo que Junior pidió, ajusta los filtros y vuelve a intentar antes de rendirte.
+
+Reglas:
+- NUNCA inventes eventos, correos o datos — solo usa lo que las herramientas te devuelvan. Si una herramienta no trae nada, dilo honestamente.
+- NUNCA te unas a una reunión sin que Junior lo pida explícitamente en ese mismo mensaje o en el inmediatamente anterior.
+- NUNCA envíes ni respondas un correo directamente — solo puedes redactar el borrador con draft_email para que Junior lo envíe él.
+- Si Junior pide algo que aún no puedes hacer (unirte a una llamada que no sea de Google Meet), dile honestamente que esa función todavía no está disponible.
+- Responde siempre en español, con buen formato (viñetas, negritas) cuando ayude a la claridad, pero sin relleno innecesario.
+- Fecha y hora actual: {now} (America/Bogota, UTC-5). Úsala para calcular fechas relativas como "mañana", "el lunes" o "esta semana" en formato YYYY-MM-DD (calendario) o ISO 8601 con offset -05:00 (eventos).
+"""
+
+PERSONAL_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "list_calendar_events",
+            "description": (
+                "Lista o busca eventos del calendario de Junior en un rango de fechas (default hoy). "
+                "Usa 'query' para filtrar por texto en el título y 'attendee_status' para filtrar por si "
+                "algún invitado respondió con ese estado — esencial cuando hay muchos eventos similares "
+                "en un día (ej. varias citas del mismo tipo) para no traerlos todos sin filtrar."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "start_date": {"type": "string", "description": "Fecha de inicio YYYY-MM-DD (opcional, default hoy)"},
+                    "end_date": {"type": "string", "description": "Fecha de fin YYYY-MM-DD, inclusive (opcional, default = start_date)"},
+                    "query": {"type": "string", "description": "Filtra eventos cuyo título contenga este texto (opcional)"},
+                    "attendee_status": {
+                        "type": "string",
+                        "enum": ["accepted", "declined", "needsAction", "tentative"],
+                        "description": "Solo eventos donde al menos un invitado tenga este estado de respuesta (opcional)",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_calendar_event",
+            "description": "Crea un evento en el calendario de Junior.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {"type": "string", "description": "Título del evento"},
+                    "start": {"type": "string", "description": "Inicio en ISO 8601 con offset, ej. 2026-08-01T15:00:00-05:00"},
+                    "end": {"type": "string", "description": "Fin en ISO 8601 con offset"},
+                    "attendees": {"type": "array", "items": {"type": "string"}, "description": "Emails de invitados (opcional)"},
+                    "description": {"type": "string", "description": "Descripción/agenda del evento (opcional)"},
+                },
+                "required": ["summary", "start", "end"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_pending_emails",
+            "description": "Lista los correos no leídos en la bandeja de entrada de Junior.",
+            "parameters": {
+                "type": "object",
+                "properties": {"max_results": {"type": "integer", "description": "Máximo de correos a mostrar (default 10)"}},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_emails",
+            "description": (
+                "Busca correos en Gmail con una consulta usando operadores de búsqueda de Gmail: "
+                "is:unread, is:starred, from:persona@dominio.com, after:YYYY/MM/DD, before:YYYY/MM/DD, "
+                "newer_than:7d, -from:me, subject:palabra, etc. Combínalos según lo que pida Junior."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Consulta de búsqueda de Gmail"},
+                    "max_results": {"type": "integer", "description": "Máximo de resultados (default 10)"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_emails_needing_reply",
+            "description": "Encuentra correos donde el último mensaje del hilo no lo envió Junior — es decir, correos que aún no ha respondido.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days_back": {"type": "integer", "description": "Cuántos días atrás revisar (default 14)"},
+                    "max_results": {"type": "integer", "description": "Máximo de hilos a revisar (default 15)"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "draft_email",
+            "description": "Redacta el texto de un correo para que Junior lo copie y lo envíe él mismo — Panda Bear no puede enviarlo directamente.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "purpose": {"type": "string", "description": "De qué trata el correo / qué debe decir"},
+                    "recipient_name": {"type": "string", "description": "Nombre del destinatario (opcional)"},
+                    "tone": {"type": "string", "description": "Tono deseado, ej. 'profesional', 'cálido', 'formal' (default profesional)"},
+                    "language": {"type": "string", "enum": ["es", "en"], "description": "Idioma del correo (default es)"},
+                },
+                "required": ["purpose"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "join_meeting",
+            "description": (
+                "Únete ahora mismo a una reunión de Google Meet. Si Junior se refiere a una reunión de su "
+                "calendario (ej. 'mi reunión de las 3pm'), primero usa list_calendar_events para encontrarla "
+                "y lee su meetLink y eventId de ahí. Si Junior te da un link de Meet directo, pásalo tal cual "
+                "sin calendar_event_id."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "meet_url": {"type": "string", "description": "URL de Google Meet"},
+                    "calendar_event_id": {"type": "string", "description": "ID del evento de calendario, si se conoce"},
+                    "title": {"type": "string", "description": "Título/nombre de la reunión, si se conoce"},
+                },
+                "required": ["meet_url"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "leave_meeting",
+            "description": "Sal de la reunión en la que Panda Bear está conectado ahora.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "meeting_status",
+            "description": "Consulta si Panda Bear sigue conectado a una reunión y desde cuándo.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+]
+
+PERSONAL_TOOL_SKILL_MAP = {
+    "list_calendar_events": "list_calendar_events",
+    "create_calendar_event": "create_calendar_event",
+    "list_pending_emails": "list_pending_emails",
+    "search_emails": "search_emails",
+    "list_emails_needing_reply": "list_emails_needing_reply",
+    "draft_email": "draft_email",
+}
+
+# Handled directly as PandaBear methods rather than the generic skill map —
+# these control a live service (meeting_join_service), not a stateless skill.
+PERSONAL_AGENT_METHOD_TOOLS = {"join_meeting", "leave_meeting", "meeting_status"}
+
+PERSONAL_CONFIRM_YES = ["sí", "si", "confirmo", "confirmar", "dale", "ok", "okay", "adelante", "hazlo", "yes"]
+PERSONAL_CONFIRM_NO = ["no", "cancela", "cancelar", "cancélalo", "cancelalo"]
 
 SYSTEM_PROMPT = """Eres Panda Bear 🐼, el agente de People Operations de Koronet.
 
@@ -62,9 +259,10 @@ class PandaBear:
     - Judgment (how it makes decisions)
     """
 
-    def __init__(self, kernel: ServiceKernel = None):
+    def __init__(self, kernel: ServiceKernel = None, google_service=None):
         self._memory = AgentMemory()
         self._kernel = kernel or ServiceKernel()
+        self._google = google_service
         self._conversations: dict = {}
 
         # Skills registry
@@ -79,6 +277,15 @@ class PandaBear:
             "generate_image": GenerateImageSkill(self._memory),
             "refine_content": RefineContentSkill(self._memory),
             "approval_workflow": ApprovalWorkflowSkill(self._memory),
+            "list_calendar_events": ListCalendarEventsSkill(self._memory, google_service=self._google),
+            "create_calendar_event": CreateCalendarEventSkill(self._memory, google_service=self._google),
+            "list_pending_emails": ListPendingEmailsSkill(self._memory, google_service=self._google),
+            "search_emails": SearchEmailsSkill(self._memory, google_service=self._google),
+            "list_emails_needing_reply": ListEmailsNeedingReplySkill(self._memory, google_service=self._google),
+            "draft_email": DraftEmailSkill(self._memory),
+            "create_summary_doc": CreateSummaryDocSkill(self._memory, google_service=self._google),
+            "create_summary_slides": CreateSummarySlidesSkill(self._memory, google_service=self._google),
+            "summarize_transcript": SummarizeTranscriptSkill(self._memory),
         }
 
     # ── IDENTITY ────────────────────────────────────────────────
@@ -120,19 +327,433 @@ class PandaBear:
         if not groq_client:
             reply = "No puedo pensar ahora mismo — Groq AI no está configurado."
         else:
-            response = groq_client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=messages,
-                max_tokens=1500,
-                temperature=0.3,
-            )
-            reply = response.choices[0].message.content
+            try:
+                response = groq_client.chat.completions.create(
+                    model="llama-3.3-70b-versatile",
+                    messages=messages,
+                    max_tokens=1500,
+                    temperature=0.3,
+                )
+                reply = response.choices[0].message.content
+            except GroqRateLimitError:
+                reply = "⚠️ Se agotó la cuota de Groq AI por ahora (límite de tokens alcanzado). Espera unos minutos y vuelve a intentarlo."
 
         self._conversations[user_id].append({"role": "assistant", "content": reply})
         self._memory.save_message(user_id, "user", text, bamboo_context)
         self._memory.save_message(user_id, "assistant", reply)
 
         return reply
+
+    # ── PERSONAL ASSISTANT (Junior-only) ───────────────────────────
+
+    def _salvage_broken_tool_call(self, error) -> "SimpleNamespace | None":
+        """
+        Groq's llama-3.3-70b-versatile occasionally emits its native
+        <function=name {json}</function> tag instead of a structured tool
+        call, and Groq's own parser then rejects it as tool_use_failed —
+        even though the generated content is valid. Parse it out of the
+        error body instead of failing the whole turn.
+        """
+        try:
+            body = getattr(error, "body", None) or {}
+            failed_generation = body.get("error", {}).get("failed_generation", "")
+        except Exception:
+            return None
+        if not failed_generation:
+            return None
+
+        m = re.search(r"<function=([a-zA-Z_][a-zA-Z0-9_]*)\s*(\{.*?\})\s*</function>", failed_generation, re.DOTALL)
+        if not m:
+            return None
+        name, args_str = m.group(1), m.group(2)
+        try:
+            args = json.loads(args_str)
+        except json.JSONDecodeError:
+            return None
+        return SimpleNamespace(
+            id=f"salvaged_{name}",
+            function=SimpleNamespace(name=name, arguments=json.dumps(args, ensure_ascii=False)),
+        )
+
+    def think_personal(self, user_id: str, text: str) -> str:
+        """
+        Personal-assistant brain — calendar/email with real tool-calling.
+        Only reachable for JUNIOR_SLACK_ID; checked here again even though
+        the router in main.py already filters by user_id (defense in depth).
+        Anything that would notify someone else (an invite with attendees)
+        is drafted first and requires an explicit yes/no reply before it runs.
+        """
+        if not JUNIOR_SLACK_ID or user_id != JUNIOR_SLACK_ID:
+            return "No tengo permiso para hacer esto en este chat."
+
+        if user_id not in self._conversations:
+            self._conversations[user_id] = []
+
+        pending = self._get_pending_confirmation(user_id)
+        if pending:
+            reply = self._resolve_pending_confirmation(user_id, pending, text)
+            self._conversations[user_id].append({"role": "user", "content": text})
+            self._conversations[user_id].append({"role": "assistant", "content": reply})
+            return reply
+
+        now_str = datetime.now().astimezone().strftime("%A %Y-%m-%d %H:%M (America/Bogota, UTC-05:00)")
+        system_prompt = PERSONAL_SYSTEM_PROMPT.format(now=now_str)
+
+        self._conversations[user_id].append({"role": "user", "content": text})
+
+        if not groq_client:
+            return "No puedo pensar ahora mismo — Groq AI no está configurado."
+
+        # Working message list for THIS turn's reasoning loop. Only the plain
+        # user text + final reply get persisted to self._conversations —
+        # intermediate tool calls/results stay local to this turn.
+        history = self._conversations[user_id][-20:]
+        messages = [{"role": "system", "content": system_prompt}] + history
+
+        reply = None
+        MAX_STEPS = 5
+        for _ in range(MAX_STEPS):
+            msg = None
+            rate_limited = False
+            for attempt in range(2):
+                try:
+                    response = groq_client.chat.completions.create(
+                        model="llama-3.3-70b-versatile",
+                        messages=messages,
+                        tools=PERSONAL_TOOLS,
+                        tool_choice="auto",
+                        max_tokens=1200,
+                        temperature=0.2,
+                    )
+                    msg = response.choices[0].message
+                    break
+                except GroqBadRequestError as e:
+                    salvaged = self._salvage_broken_tool_call(e)
+                    if salvaged:
+                        msg = SimpleNamespace(content="", tool_calls=[salvaged])
+                        break
+                except GroqRateLimitError:
+                    rate_limited = True
+                    break  # retrying immediately won't help — a daily/per-minute quota needs real time to pass
+            if rate_limited:
+                reply = (
+                    "⚠️ Se agotó la cuota de Groq AI por ahora (límite de tokens alcanzado). "
+                    "Espera unos minutos y vuelve a intentarlo."
+                )
+                break
+            if msg is None:
+                reply = "⚠️ No logré formular bien la respuesta (falló la llamada a herramientas dos veces seguidas). Intenta reformular tu pedido de otra forma."
+                break
+
+            if not msg.tool_calls:
+                reply = msg.content or "No entendí bien lo que necesitas — ¿puedes reformularlo?"
+                break
+
+            messages.append({
+                "role": "assistant",
+                "content": msg.content or "",
+                "tool_calls": [
+                    {"id": tc.id, "type": "function",
+                     "function": {"name": tc.function.name, "arguments": tc.function.arguments}}
+                    for tc in msg.tool_calls
+                ],
+            })
+
+            awaiting_confirmation = False
+            for tool_call in msg.tool_calls:
+                fn_name = tool_call.function.name
+                try:
+                    fn_args = json.loads(tool_call.function.arguments or "{}")
+                except json.JSONDecodeError:
+                    fn_args = {}
+                if not isinstance(fn_args, dict):
+                    fn_args = {}
+
+                if fn_name == "create_calendar_event" and fn_args.get("attendees"):
+                    reply = self._draft_event_confirmation(user_id, fn_args)
+                    awaiting_confirmation = True
+                    break  # a human confirmation is needed — stop reasoning here
+
+                if fn_name in PERSONAL_AGENT_METHOD_TOOLS:
+                    result = getattr(self, fn_name)(**fn_args)
+                else:
+                    skill_name = PERSONAL_TOOL_SKILL_MAP.get(fn_name)
+                    result = self.invoke_skill(skill_name, **fn_args) if skill_name else {"success": False, "error": f"Herramienta desconocida: {fn_name}"}
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tool_call.id,
+                    "content": json.dumps(result, default=str, ensure_ascii=False)[:6000],
+                })
+
+            if awaiting_confirmation:
+                break
+        else:
+            reply = "Necesité demasiados pasos para resolver esto — ¿puedes ser más específico?"
+
+        self._conversations[user_id].append({"role": "assistant", "content": reply})
+        self._memory.save_message(user_id, "user", text)
+        self._memory.save_message(user_id, "assistant", reply)
+        return reply
+
+    def _draft_event_confirmation(self, user_id: str, fn_args: dict) -> str:
+        conn = get_db()
+        try:
+            conn.execute(
+                "INSERT INTO pending_confirmations (userId, actionType, payload, summary, status, createdAt) "
+                "VALUES (?, 'create_calendar_event', ?, ?, 'pending', ?)",
+                (user_id, json.dumps(fn_args), fn_args.get("summary", ""), datetime.now().isoformat()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        attendees = ", ".join(fn_args.get("attendees", []))
+        return (
+            "📅 *Borrador de evento — pendiente de tu confirmación:*\n\n"
+            f"*{fn_args.get('summary')}*\n"
+            f"🕐 {fn_args.get('start')} → {fn_args.get('end')}\n"
+            f"👥 Invitados: {attendees}\n"
+            + (f"📝 {fn_args.get('description')}\n" if fn_args.get("description") else "")
+            + "\n¿Confirmas que lo agende y les envíe la invitación? Responde *sí* o *no*."
+        )
+
+    def _get_pending_confirmation(self, user_id: str) -> dict | None:
+        conn = get_db()
+        try:
+            row = conn.execute(
+                "SELECT * FROM pending_confirmations WHERE userId=? AND status='pending' ORDER BY createdAt DESC LIMIT 1",
+                (user_id,),
+            ).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def _resolve_pending_confirmation(self, user_id: str, pending: dict, text: str) -> str:
+        action_type = pending.get("actionType")
+        if action_type == "meeting_output_choice":
+            return self._resolve_meeting_output_choice(pending, text)
+        return self._resolve_calendar_confirmation(pending, text)
+
+    def _resolve_calendar_confirmation(self, pending: dict, text: str) -> str:
+        text_lower = text.strip().lower()
+        conn = get_db()
+        try:
+            if any(w == text_lower or w in text_lower for w in PERSONAL_CONFIRM_YES):
+                fn_args = json.loads(pending["payload"])
+                result = self.invoke_skill("create_calendar_event", **fn_args)
+                conn.execute(
+                    "UPDATE pending_confirmations SET status='confirmed', resolvedAt=? WHERE id=?",
+                    (datetime.now().isoformat(), pending["id"]),
+                )
+                conn.commit()
+                if result.get("success", True) and result.get("result"):
+                    link = result["result"].get("link", "")
+                    return f"✅ Listo — evento creado y invitaciones enviadas.\n{link}"
+                return f"⚠️ No pude crear el evento: {result.get('error', 'error desconocido')}"
+
+            if any(w == text_lower or w in text_lower for w in PERSONAL_CONFIRM_NO):
+                conn.execute(
+                    "UPDATE pending_confirmations SET status='cancelled', resolvedAt=? WHERE id=?",
+                    (datetime.now().isoformat(), pending["id"]),
+                )
+                conn.commit()
+                return "Cancelado — no se creó el evento ni se envió ninguna invitación."
+
+            summary = json.loads(pending["payload"]).get("summary", "")
+            return (
+                f"Tienes un evento pendiente de confirmación: *{summary}*.\n"
+                "Responde *sí* para confirmarlo o *no* para cancelarlo."
+            )
+        finally:
+            conn.close()
+
+    def _resolve_meeting_output_choice(self, pending: dict, text: str) -> str:
+        text_lower = text.strip().lower()
+        payload = json.loads(pending["payload"])
+        meeting_note_id = payload["meetingNoteId"]
+
+        if any(w in text_lower for w in ["1", "compromiso", "compromisos"]):
+            output_format = "commitments"
+        elif any(w in text_lower for w in ["2", "documento", "doc", "resumen"]):
+            output_format = "document"
+        elif any(w in text_lower for w in ["3", "presentación", "presentacion", "slides"]):
+            output_format = "slides"
+        else:
+            return (
+                "No entendí qué formato quieres para esas notas de reunión. "
+                "Responde *1* (solo compromisos), *2* (resumen en documento) o *3* (presentación)."
+            )
+
+        conn = get_db()
+        try:
+            conn.execute(
+                "UPDATE pending_confirmations SET status='confirmed', resolvedAt=? WHERE id=?",
+                (datetime.now().isoformat(), pending["id"]),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        return self.generate_meeting_output(meeting_note_id, output_format)
+
+    # ── MEETING NOTES (Fathom webhook OR agent-joined call → Slack ask → generate) ──
+
+    def ingest_meeting_content(self, title: str, transcript: str, summary: str,
+                                action_items: list, fathom_meeting_id: str = None) -> int:
+        """
+        Single write path for 'a meeting produced content' — used by both the
+        Fathom webhook and the agent's own join-and-record flow. Writes
+        meeting_notes + commitments, then asks Junior how he wants it.
+        """
+        conn = get_db()
+        try:
+            c = conn.cursor()
+            c.execute(
+                """
+                INSERT INTO meeting_notes
+                (title, fathomMeetingId, transcriptText, summaryText, rawActionItems, status, createdAt)
+                VALUES (?, ?, ?, ?, ?, 'awaiting_format_choice', ?)
+                """,
+                (title, fathom_meeting_id, transcript, summary, json.dumps(action_items, ensure_ascii=False),
+                 datetime.now().isoformat()),
+            )
+            meeting_note_id = c.lastrowid
+
+            for item in action_items:
+                description = item.get("description") if isinstance(item, dict) else str(item)
+                owner = item.get("owner") if isinstance(item, dict) else None
+                due_hint = item.get("due") if isinstance(item, dict) else None
+                c.execute(
+                    "INSERT INTO commitments (meetingNoteId, description, owner, dueHint, status, createdAt) "
+                    "VALUES (?, ?, ?, ?, 'open', ?)",
+                    (meeting_note_id, description, owner, due_hint, datetime.now().isoformat()),
+                )
+            conn.commit()
+        finally:
+            conn.close()
+
+        self.notify_meeting_note_ready(meeting_note_id, title, len(action_items))
+        return meeting_note_id
+
+    def process_recorded_meeting(self, title: str, transcript: str, meet_url: str = None) -> None:
+        """Called by meeting_join_service once a call it recorded has ended and been transcribed."""
+        result = self.invoke_skill("summarize_transcript", transcript=transcript, title=title)
+        if result.get("success", True) and result.get("result"):
+            summary = result["result"].get("summary", "")
+            action_items = result["result"].get("action_items", [])
+        else:
+            summary, action_items = "", []  # never drop the transcript even if summarization fails
+        self.ingest_meeting_content(title=title, transcript=transcript, summary=summary, action_items=action_items)
+
+    # ── MEETING JOIN CONTROL (Junior-only, Slack or dashboard) ──────
+
+    def join_meeting(self, meet_url: str, calendar_event_id: str = None, title: str = None) -> dict:
+        svc = self._kernel.get_service("meeting_join_service")
+        if not svc:
+            return {"success": False, "error": "meeting_join_service no está registrado"}
+        return svc.start_join(meet_url=meet_url, calendar_event_id=calendar_event_id, title=title)
+
+    def leave_meeting(self) -> dict:
+        svc = self._kernel.get_service("meeting_join_service")
+        if not svc:
+            return {"success": False, "error": "meeting_join_service no está registrado"}
+        return svc.request_leave()
+
+    def meeting_status(self) -> dict:
+        svc = self._kernel.get_service("meeting_join_service")
+        if not svc:
+            return {"success": False, "error": "meeting_join_service no está registrado"}
+        return svc.get_status()
+
+    def notify_meeting_note_ready(self, meeting_note_id: int, title: str, action_items_count: int) -> None:
+        """Called once a meeting's transcript/summary/action_items are ready — asks Junior the format."""
+        if not JUNIOR_SLACK_ID:
+            return
+        conn = get_db()
+        try:
+            conn.execute(
+                "INSERT INTO pending_confirmations (userId, actionType, payload, summary, status, createdAt) "
+                "VALUES (?, 'meeting_output_choice', ?, ?, 'pending', ?)",
+                (JUNIOR_SLACK_ID, json.dumps({"meetingNoteId": meeting_note_id}), title, datetime.now().isoformat()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        text = (
+            f"🐼 *Terminé de tomar nota de '{title}'* ({action_items_count} compromiso(s) detectado(s)).\n\n"
+            "¿Cómo quieres el resultado?\n"
+            "1️⃣ Solo los compromisos\n"
+            "2️⃣ Resumen en documento\n"
+            "3️⃣ Presentación\n\n"
+            "Responde con el número o la palabra."
+        )
+        slack_svc = self._kernel.get_service("slack_service")
+        if slack_svc and slack_svc.client:
+            slack_svc.send_notification(JUNIOR_SLACK_ID, text)
+
+    def generate_meeting_output(self, meeting_note_id: int, output_format: str) -> str:
+        conn = get_db()
+        try:
+            note = conn.execute("SELECT * FROM meeting_notes WHERE id=?", (meeting_note_id,)).fetchone()
+            if not note:
+                return "⚠️ No encontré esas notas de reunión."
+            note = dict(note)
+            commitments = [
+                dict(c) for c in conn.execute(
+                    "SELECT * FROM commitments WHERE meetingNoteId=? ORDER BY id", (meeting_note_id,)
+                ).fetchall()
+            ]
+        finally:
+            conn.close()
+
+        if output_format == "commitments":
+            reply = self._format_commitments_reply(note["title"], commitments)
+            self._mark_meeting_note_done(meeting_note_id, "commitments")
+            return reply
+
+        if output_format == "document":
+            result = self.invoke_skill(
+                "create_summary_doc", title=note["title"], summary=note["summaryText"], commitments=commitments
+            )
+            if not result.get("success", True):
+                return f"⚠️ No pude crear el documento: {result.get('error')}"
+            link = result["result"]["link"]
+            self._mark_meeting_note_done(meeting_note_id, "document", doc_link=link)
+            return f"✅ Listo — resumen creado:\n{link}"
+
+        if output_format == "slides":
+            result = self.invoke_skill(
+                "create_summary_slides", title=note["title"], summary=note["summaryText"], commitments=commitments
+            )
+            if not result.get("success", True):
+                return f"⚠️ No pude crear la presentación: {result.get('error')}"
+            link = result["result"]["link"]
+            self._mark_meeting_note_done(meeting_note_id, "slides", slides_link=link)
+            return f"✅ Listo — presentación creada:\n{link}"
+
+        return "Formato no reconocido."
+
+    def _format_commitments_reply(self, title: str, commitments: list) -> str:
+        if not commitments:
+            return f"No detecté compromisos claros en '{title}'."
+        lines = [f"📋 *Compromisos de '{title}':*\n"]
+        for c in commitments:
+            owner = f" — {c['owner']}" if c.get("owner") else ""
+            due = f" (para {c['dueHint']})" if c.get("dueHint") else ""
+            lines.append(f"• {c['description']}{owner}{due}")
+        return "\n".join(lines)
+
+    def _mark_meeting_note_done(self, meeting_note_id: int, output_format: str, doc_link: str = None, slides_link: str = None) -> None:
+        conn = get_db()
+        try:
+            conn.execute(
+                "UPDATE meeting_notes SET status='done', outputFormat=?, docLink=?, slidesLink=? WHERE id=?",
+                (output_format, doc_link, slides_link, meeting_note_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
 
     def _fetch_relevant_context(self, text: str) -> str:
         """Decides what BambooHR data to fetch based on the user's question."""
@@ -207,7 +828,9 @@ class PandaBear:
         country = emp.get("country", "")
 
         # Apply country rules
-        country_result = self._skills["country_rules"].execute(location=location, country=country)
+        country_result = self._skills["country_rules"].execute(
+            location=location, country=country, hire_date=hire_date.strftime("%Y-%m-%d")
+        )
         rules = country_result["result"]
         lang = rules["language"]
         onboarding_time = rules["onboardingTime"]
@@ -218,6 +841,8 @@ class PandaBear:
             hire_date=hire_date.strftime("%Y-%m-%d")
         )
         manager_notify_date = calendar_result["result"]["managerNotifyDate"]
+        email_notify_date = calendar_result["result"]["emailNotifyDate"]
+        koronet_notify_date = calendar_result["result"]["koronetNotifyDate"]
 
         # Check lessons learned for this country/department
         lessons = self._memory.get_lessons_for_context(country=country)
@@ -230,6 +855,8 @@ class PandaBear:
             "onboardingTime": onboarding_time,
             "ccEmail": cc_email,
             "managerNotifyDate": manager_notify_date,
+            "emailNotifyDate": email_notify_date,
+            "koronetNotifyDate": koronet_notify_date,
             "steps": [
                 "generate_welcome_image",
                 "generate_employee_email",
@@ -284,11 +911,15 @@ class PandaBear:
             conn.commit()
 
             # G1: Detect
-            already_ids = set(
+            # A list, not a set — record_decision() below JSON-serializes
+            # every kwarg passed to a skill, and json.dumps can't handle a
+            # set. That crash used to fire on every sync that successfully
+            # reached BambooHR (the only path that hits record_decision).
+            already_ids = list(dict.fromkeys(
                 row[0] for row in c.execute(
                     "SELECT DISTINCT employeeId FROM messages"
                 ).fetchall()
-            )
+            ))
             detect_result = self._skills["detect_employees"].execute(
                 lookback_days=lookback_days,
                 already_processed=already_ids,
@@ -309,30 +940,69 @@ class PandaBear:
                             if v and not emp.get(k):
                                 emp[k] = v
 
+                        # Job Information (manager, title, department...) is a
+                        # dated table — the flat profile fields above only
+                        # reflect whichever row BambooHR currently considers
+                        # "current", which for a rehire can still be the
+                        # *previous* stint's title/manager (same employee
+                        # record, employmentHistoryStatus stuck on
+                        # "Terminated" until their new row's date arrives).
+                        # The dated row effective on/closest-before the hire
+                        # date is the authoritative source for THIS hire, so
+                        # it always overrides the flat snapshot — never just
+                        # fills blanks — otherwise a rehire silently keeps
+                        # the old manager/title from their last stint.
+                        job_info_rows = get_job_info_table(bamboo_id)
+                        dated_rows = sorted(
+                            (r for r in job_info_rows if r.get("date")),
+                            key=lambda r: r["date"],
+                        )
+                        hire_str_cmp = hire_date.strftime("%Y-%m-%d")
+                        applicable = [r for r in dated_rows if r["date"] <= hire_str_cmp]
+                        job_info = applicable[-1] if applicable else (dated_rows[-1] if dated_rows else {})
+                        for k in ("reportsTo", "jobTitle", "department", "division", "location"):
+                            v = job_info.get(k)
+                            if v:
+                                emp[k] = v
+                        if job_info.get("reportsTo"):
+                            # supervisorEId came from the stale flat profile
+                            # (e.g. the previous stint's manager) — drop it so
+                            # the name-based lookup below resolves the NEW
+                            # manager from reportsTo instead of the old id.
+                            emp["supervisorEId"] = ""
+
                     emp_name = f"{emp.get('firstName', '')} {emp.get('lastName', '')}".strip()
                     emp_number = str(emp.get("employeeNumber", ""))
                     location = emp.get("location", "") or emp.get("country", "")
                     country = emp.get("country", "")
-                    manager = emp.get("supervisor", "")
+                    manager = emp.get("reportsTo") or emp.get("supervisor") or ""
+                    manager_first_name = resolve_manager_first_name(emp.get("supervisorEId", ""), manager)
 
                     # G2: Plan
                     plan = self.plan_onboarding(emp, hire_date)
                     lang = plan["language"]
                     onboarding_time = plan["onboardingTime"]
 
-                    # Generate image (with photo if available)
+                    # Generate the flyer ONLY if BambooHR has a photo — a flyer with a
+                    # blank/black circle where the photo should be is worse than no
+                    # flyer at all, so we never generate or save that version. If
+                    # there's no photo yet, the batch is flagged and Junior is asked
+                    # for one; the flyer gets created once he provides it.
                     photo_bytes = get_employee_photo(bamboo_id) if bamboo_id else None
-                    image_result = self._skills["generate_image"].execute(
-                        name=emp_name,
-                        job_title=emp.get("jobTitle", ""),
-                        photo_bytes=photo_bytes,
-                    )
-                    image_path = image_result.get("imagePath") if image_result.get("success", True) else None
+                    image_path = None
+                    if photo_bytes:
+                        image_result = self._skills["generate_image"].execute(
+                            name=emp_name,
+                            job_title=emp.get("jobTitle", ""),
+                            photo_bytes=photo_bytes,
+                        )
+                        image_path = image_result.get("imagePath") if image_result.get("success", True) else None
+                    photo_status = "complete" if image_path else "missing"
 
                     # Create batch for this employee
                     c.execute(
-                        "INSERT INTO batches (createdAt, messageCount, employeeName) VALUES (?, 3, ?)",
-                        (datetime.now().isoformat(), emp_name),
+                        "INSERT INTO batches (createdAt, messageCount, employeeName, photoStatus, bambooEmployeeId) VALUES (?, 3, ?, ?, ?)",
+                        (datetime.now().isoformat(), emp_name, photo_status, bamboo_id),
                     )
                     batch_id = c.lastrowid
                     conn.commit()
@@ -345,7 +1015,7 @@ class PandaBear:
                         onboarding_time=onboarding_time,
                     )
                     manager_result = self._skills["generate_slack_manager"].execute(
-                        manager_name=manager,
+                        manager_name=manager_first_name,
                         employee_name=emp_name,
                         language=lang,
                     )
@@ -353,6 +1023,7 @@ class PandaBear:
                         first_name=emp.get("firstName", ""),
                         last_name=emp.get("lastName", ""),
                         job_title=emp.get("jobTitle", "New Team Member"),
+                        gender=emp.get("gender", ""),
                     )
 
                     hire_str = hire_date.strftime("%Y-%m-%d")
@@ -363,21 +1034,30 @@ class PandaBear:
                         ("manager_slack", manager_result, emp_number + "_mgr", None),
                         ("bienvenidas_slack", bienvenida_result, emp_number + "_bvd", image_path),
                     ]:
+                        manager_message_date = plan["managerNotifyDate"] if msg_type == "manager_slack" else None
+                        email_message_date = plan["emailNotifyDate"] if msg_type == "employee_email" else None
+                        koronet_message_date = plan["koronetNotifyDate"] if msg_type == "bienvenidas_slack" else None
                         c.execute("""
                             INSERT INTO messages
                             (runId, employeeId, employeeName, employeeJobTitle, employeeHireDate,
                              employeeEmail, employeeLocation, managerName, messageType, messageContent,
-                             language, imagePath, status, createdAt, batchId)
-                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_approval', ?, ?)
+                             language, imagePath, status, createdAt, batchId, managerMessageDate,
+                             emailMessageDate, koronetMessageDate, ccEmail)
+                            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending_approval', ?, ?, ?, ?, ?, ?)
                         """, (
                             run_id, extra_emp_id, emp_name, emp.get("jobTitle", ""),
                             hire_str, emp.get("workEmail", ""), location, manager,
                             msg_type, content_result.get("result", ""), lang,
-                            img, datetime.now().isoformat(), batch_id,
+                            img, datetime.now().isoformat(), batch_id, manager_message_date,
+                            email_message_date, koronet_message_date,
+                            plan["ccEmail"] if msg_type == "employee_email" else None,
                         ))
                         messages_created += 1
 
                     conn.commit()
+
+                    if photo_status == "missing":
+                        self._notify_missing_photo(emp_name, batch_id)
 
                     # Record employee in memory
                     self._memory.remember_employee({
@@ -459,6 +1139,63 @@ class PandaBear:
         except Exception as e:
             print(f"[Agent] Could not notify approver: {e}")
 
+    def _notify_missing_photo(self, emp_name: str, batch_id: int) -> None:
+        """BambooHR has no photo for this hire yet — ask Junior for one instead of
+        generating a flyer with a blank/black circle where the photo should be."""
+        slack_svc = self._kernel.get_service("slack_service")
+        if not slack_svc or not slack_svc.client:
+            return
+        try:
+            juni_id = slack_svc.find_user_by_name("junior")
+            if not juni_id:
+                return
+            text = (
+                f"🐼 *{emp_name}* no tiene foto cargada en BambooHR — no genero el flyer "
+                f"con el círculo en negro. Los mensajes de texto ya están listos para revisar "
+                f"en el dashboard (batch #{batch_id}). Subí la foto cuando la tengas y yo armo "
+                f"el flyer: `POST /api/agent/batches/{batch_id}/photo` con la imagen, o pedime "
+                f"que lo haga por vos."
+            )
+            slack_svc.send_notification(juni_id, text)
+        except Exception as e:
+            print(f"[Agent] Could not notify missing photo: {e}")
+
+    def attach_employee_photo(self, batch_id: int, photo_bytes: bytes) -> dict:
+        """
+        Generates the flyer now that a photo is available and attaches it to every
+        message in the batch that carries an image (employee_email, bienvenidas_slack).
+        """
+        conn = get_db()
+        try:
+            batch = conn.execute("SELECT * FROM batches WHERE id=?", (batch_id,)).fetchone()
+            if not batch:
+                return {"success": False, "error": f"Batch {batch_id} not found"}
+
+            msgs = conn.execute("SELECT * FROM messages WHERE batchId=?", (batch_id,)).fetchall()
+            if not msgs:
+                return {"success": False, "error": f"No messages found for batch {batch_id}"}
+            ref = dict(msgs[0])
+
+            image_result = self._skills["generate_image"].execute(
+                name=ref["employeeName"],
+                job_title=ref.get("employeeJobTitle", ""),
+                photo_bytes=photo_bytes,
+            )
+            if not image_result.get("success", True):
+                return {"success": False, "error": image_result.get("error", "Image generation failed")}
+
+            image_path = image_result["imagePath"]
+            conn.execute(
+                "UPDATE messages SET imagePath=? WHERE batchId=? AND messageType IN ('employee_email','bienvenidas_slack')",
+                (image_path, batch_id),
+            )
+            conn.execute("UPDATE batches SET photoStatus='complete' WHERE id=?", (batch_id,))
+            conn.commit()
+
+            return {"success": True, "imagePath": image_path}
+        finally:
+            conn.close()
+
     # ── MORNING BRIEF ────────────────────────────────────────────
 
     def morning_brief(self) -> dict:
@@ -495,10 +1232,16 @@ class PandaBear:
                 emp for emp in employees
                 if emp.get("hireDate") == today.strftime("%Y-%m-%d")
             ]
+            def _days_until_hire(emp):
+                # BambooHR returns '0000-00-00' for hires with no date set
+                try:
+                    return (datetime.strptime(emp.get("hireDate") or "", "%Y-%m-%d") - today).days
+                except ValueError:
+                    return None
+
             upcoming_week = [
                 emp for emp in employees
-                if emp.get("hireDate") and
-                0 <= (datetime.strptime(emp["hireDate"], "%Y-%m-%d") - today).days <= 7
+                if (d := _days_until_hire(emp)) is not None and 0 <= d <= 7
             ]
 
             pending_managers = set()
@@ -580,7 +1323,7 @@ class PandaBear:
             if not msgs:
                 return {"learned": False, "reason": "No messages found for this batch"}
 
-            approved = sum(1 for m in msgs if m["status"] == "sent")
+            approved = sum(1 for m in msgs if m["status"] in ("sent", "approved", "draft_created", "ready_for_slack_draft"))
             edited = sum(1 for m in msgs if m["status"] == "sent")
             rejected = sum(1 for m in msgs if m["status"] == "rejected")
             skipped = sum(1 for m in msgs if m["status"] == "skipped")
@@ -663,72 +1406,307 @@ class PandaBear:
 
     # ── EXECUTE ─────────────────────────────────────────────────
 
-    def execute_batch(self, batch_id: int) -> dict:
-        """
-        Executes an approved batch: sends each message to its destination via Slack.
-        Called ONLY after HR has approved through the approval workflow.
-        manager_slack  → DM to the manager
-        bienvenidas_slack → post to the configured channel
-        employee_email → DM to the approver as a preview (no SMTP configured)
-        """
-        slack = self._kernel.get_service("slack_service")
-        if not slack or not slack.client:
-            return {"executed": False, "error": "Slack service not available"}
+    # Approving a message = creating its DRAFT. Panda Bear never sends or
+    # posts anything itself; Junior reviews each draft and sends it by hand.
+    # See DECISIONS.md — do not add any code path that sends on approval.
+    #
+    # Message statuses after approval (one of these three, never 'sent'):
+    #   draft_created         → a real draft exists (Gmail draft id stored in draftId)
+    #   ready_for_slack_draft → approved, destination verified, but the Slack draft
+    #                           does NOT exist yet: Slack has no public API for a bot
+    #                           to create drafts, so Claude stages it on request.
+    #   failed                → nothing was created; deliveryError says why.
+    # 'sent' is only ever set by Junior himself ("Ya lo envié" in the dashboard).
 
+    MESSAGE_LABELS = {
+        "employee_email": "Correo de bienvenida",
+        "manager_slack": "DM al líder",
+        "bienvenidas_slack": "Bienvenida en #koronet",
+    }
+    NON_SPANISH_CC = "moira.gago@koronet.com"
+
+    def approve_message(self, msg_id: int, notify: bool = True) -> dict:
+        """Approves ONE message and immediately creates its draft. Never raises."""
+        claim = self._skills["approval_workflow"].execute(action="approve_message", message_id=msg_id)
+        if not claim.get("success"):
+            return {"id": msg_id, "status": claim.get("currentStatus"), "created": False,
+                    "error": claim.get("error", "No se pudo aprobar")}
+        result = self.prepare_message_draft(msg_id)
+        self._refresh_batch_status(claim.get("batchId"))
+        if notify:
+            self._notify_execution_result(claim.get("batchId"), [result])
+            self.kick_slack_drafts([result])
+        return result
+
+    def approve_all(self, batch_id: int) -> dict:
+        """'Aprobar todos': approves every still-pending message of a hire, one by one."""
         conn = get_db()
-        results = []
-        bienvenidas_channel = os.getenv("BIENVENIDAS_CHANNEL", "bienvenidas")
-
         try:
-            msgs = conn.execute(
-                "SELECT * FROM messages WHERE batchId=? AND status='sent'", (batch_id,)
-            ).fetchall()
-
-            for msg in msgs:
-                msg = dict(msg)
-                mtype = msg["messageType"]
-                content = msg["messageContent"]
-                image = msg.get("imagePath")
-                outcome = {}
-
-                if mtype == "manager_slack":
-                    manager = msg.get("managerName") or ""
-                    manager_id = slack.find_user_by_name(manager) if manager else None
-                    if manager_id:
-                        outcome = slack.send_notification(manager_id, content)
-                    else:
-                        # Manager not found — notify approver so they can forward manually
-                        approver_id = slack.find_user_by_name("junior")
-                        note = f"⚠️ *Manager no encontrado en Slack para {msg['employeeName']}.*\nReenvía este mensaje manualmente:\n\n{content}"
-                        outcome = slack.send_notification(approver_id, note) if approver_id else {"sent": False, "error": "Approver not found"}
-
-                elif mtype == "bienvenidas_slack":
-                    outcome = slack.post_to_channel(bienvenidas_channel, content, image)
-
-                elif mtype == "employee_email":
-                    # No SMTP — forward to approver as preview
-                    approver_id = slack.find_user_by_name("junior")
-                    note = f"📧 *Email pendiente de enviar a {msg['employeeName']}:*\n\n{content}"
-                    outcome = slack.send_notification(approver_id, note) if approver_id else {"sent": False, "error": "Approver not found"}
-
-                status = "delivered" if outcome.get("sent") else "failed"
-                conn.execute(
-                    "UPDATE messages SET status=? WHERE id=?",
-                    (status, msg["id"]),
-                )
-                results.append({"id": msg["id"], "type": mtype, "status": status, "detail": outcome})
-
-            conn.commit()
-            delivered = sum(1 for r in results if r["status"] == "delivered")
-            self._memory.record_decision(
-                skill_name="execute_batch",
-                decision=f"Batch {batch_id} executed — {delivered}/{len(results)} messages delivered",
-                reasoning="HR approved the batch. Agent sent via Slack.",
-                context={"batchId": batch_id, "results": results},
-            )
-            return {"executed": True, "delivered": delivered, "total": len(results), "results": results}
+            ids = [r["id"] for r in conn.execute(
+                "SELECT id FROM messages WHERE batchId=? AND status='pending_approval' ORDER BY id",
+                (batch_id,),
+            ).fetchall()]
         finally:
             conn.close()
+        results = [self.approve_message(i, notify=False) for i in ids]
+        self._refresh_batch_status(batch_id)
+        if results:
+            self._notify_execution_result(batch_id, results)
+            self.kick_slack_drafts(results)
+        return {
+            "batchId": batch_id,
+            "approved": len(results),
+            "created": sum(1 for r in results if r["status"] == "draft_created"),
+            "results": results,
+        }
+
+    def prepare_message_draft(self, msg_id: int) -> dict:
+        """
+        Turns one approved (or previously failed) message into a draft and records
+        the honest outcome. Any exception ends in 'failed' with the error stored —
+        an approval can never be left silently 'approved' or marked 'sent'.
+        """
+        conn = get_db()
+        try:
+            row = conn.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
+        finally:
+            conn.close()
+        if not row:
+            return {"id": msg_id, "status": None, "created": False, "error": "Mensaje no encontrado"}
+        msg = dict(row)
+        if msg["status"] not in ("approved", "failed"):
+            return self._result_row(msg, {"status": msg["status"], "note": "Sin cambios: no estaba aprobado"})
+
+        try:
+            outcome = self._create_draft_for(msg)
+        except Exception as e:
+            outcome = {"status": "failed", "error": f"{type(e).__name__}: {e}"}
+        if outcome.get("status") not in ("draft_created", "ready_for_slack_draft", "failed"):
+            outcome = {"status": "failed", "error": f"Estado inesperado: {outcome.get('status')}"}
+
+        conn = get_db()
+        try:
+            conn.execute(
+                "UPDATE messages SET status=?, deliveryError=?, draftId=COALESCE(?, draftId), "
+                "slackTarget=COALESCE(?, slackTarget), ccEmail=COALESCE(?, ccEmail), "
+                "employeeEmail=COALESCE(?, employeeEmail), deliveredAt=?, "
+                "slackDraftAttempts=CASE WHEN ?='ready_for_slack_draft' THEN 0 ELSE slackDraftAttempts END "
+                "WHERE id=?",
+                (
+                    outcome["status"],
+                    outcome.get("error") if outcome["status"] == "failed" else None,
+                    outcome.get("draftId"), outcome.get("slackTarget"), outcome.get("cc"),
+                    outcome.get("to"),
+                    datetime.now().isoformat() if outcome["status"] == "draft_created" else None,
+                    outcome["status"],
+                    msg_id,
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        result = self._result_row(msg, outcome)
+        try:
+            self._memory.record_decision(
+                skill_name="prepare_message_draft",
+                decision=f"Message {msg_id} ({msg['messageType']}) for {msg['employeeName']} → {outcome['status']}",
+                reasoning="HR approved this message. Panda Bear only prepares drafts — Junior sends them himself.",
+                context=result,
+                outcome="error" if outcome["status"] == "failed" else "success",
+            )
+        except Exception as e:
+            print(f"[Agent] Could not record draft decision: {e}")
+        return result
+
+    def _result_row(self, msg: dict, outcome: dict) -> dict:
+        return {
+            "id": msg["id"],
+            "batchId": msg.get("batchId"),
+            "type": msg["messageType"],
+            "label": self.MESSAGE_LABELS.get(msg["messageType"], msg["messageType"]),
+            "status": outcome["status"],
+            "created": outcome["status"] == "draft_created",
+            "error": outcome.get("error"),
+            "note": outcome.get("note"),
+            "draftId": outcome.get("draftId"),
+            "employeeName": msg["employeeName"],
+            "managerName": msg.get("managerName"),
+            # kept for older callers that read r["detail"]["error"]
+            "detail": {"success": outcome["status"] != "failed", "error": outcome.get("error")},
+        }
+
+    def _create_draft_for(self, msg: dict) -> dict:
+        mtype = msg["messageType"]
+        if mtype == "employee_email":
+            return self._create_email_draft(msg)
+        if mtype in ("manager_slack", "bienvenidas_slack"):
+            return self._stage_slack_draft(msg)
+        return {"status": "failed", "error": f"Tipo de mensaje desconocido: {mtype}"}
+
+    def _create_email_draft(self, msg: dict) -> dict:
+        if self._google and not self._google.gmail:
+            try:
+                self._google.start()  # e.g. token refresh failed at boot
+            except Exception:
+                pass
+        if not self._google or not self._google.gmail:
+            return {"status": "failed", "error": (
+                "Gmail no está conectado (falta o expiró google_token.json — "
+                "corre 'python setup_google_auth.py')."
+            )}
+
+        to_email = msg.get("employeeEmail") or ""
+        if not to_email:
+            # BambooHR's workEmail is empty for a candidate who hasn't started
+            # yet — find their personal address in Junior's own Gmail.
+            to_email = self._google.find_personal_email(msg["employeeName"]) or ""
+        if not to_email:
+            return {"status": "failed", "error": (
+                "Sin email en BambooHR y no encontré su correo personal en Gmail — "
+                "agrégalo y vuelve a intentar."
+            )}
+
+        cc = msg.get("ccEmail") or (self.NON_SPANISH_CC if (msg.get("language") or "es") != "es" else None)
+        outcome = self._google.create_draft(
+            to=to_email,
+            subject="Tu aventura en Koronet está por comenzar 🚀",
+            body_text=msg["messageContent"],
+            image_path=msg.get("imagePath"),
+            cc=cc,
+        )
+        if not outcome.get("success") or not outcome.get("draftId"):
+            return {"status": "failed", "error": outcome.get("error") or "Gmail no confirmó el borrador"}
+        return {
+            "status": "draft_created", "draftId": outcome["draftId"], "to": to_email, "cc": cc,
+            "note": f"Borrador creado en Gmail para {to_email}" + (f" (CC {cc})" if cc else ""),
+        }
+
+    def _stage_slack_draft(self, msg: dict) -> dict:
+        """
+        Verifies the Slack destination with the bot token and leaves the message
+        as 'ready_for_slack_draft'. It does NOT create the draft — no public Slack
+        API lets a bot do that — and the result says so explicitly.
+        """
+        slack_svc = self._kernel.get_service("slack_service")
+        if not slack_svc or not slack_svc.client:
+            return {"status": "failed", "error": "Slack no está conectado (revisa SLACK_BOT_TOKEN)."}
+
+        if msg["messageType"] == "manager_slack":
+            manager = (msg.get("managerName") or "").strip()
+            if not manager:
+                return {"status": "failed", "error": "El ingreso no tiene líder asignado en BambooHR."}
+            target = slack_svc.resolve_user_id(manager)  # raises on token/scope errors
+            if not target:
+                return {"status": "failed", "error": f"No encontré a {manager} en Slack."}
+            where = f"el DM de {manager}"
+        else:
+            target = os.getenv("BIENVENIDAS_CHANNEL_ID", "CDTF8BJP4")
+            where = f"#{os.getenv('BIENVENIDAS_CHANNEL', 'koronet')}"
+
+        return {
+            "status": "ready_for_slack_draft", "slackTarget": target,
+            "note": (
+                f"Aprobado. Creando el borrador en {where} (tarda ~1 min); "
+                f"te aviso por DM cuando esté, o si falla."
+            ),
+        }
+
+    def notify_junior(self, text: str) -> bool:
+        junior_id = os.getenv("JUNIOR_SLACK_ID", "")
+        slack_svc = self._kernel.get_service("slack_service")
+        if not junior_id or not slack_svc:
+            return False
+        return bool(slack_svc.send_notification(junior_id, text).get("sent"))
+
+    def kick_slack_drafts(self, results: list) -> None:
+        """Approved Slack messages → real drafts via headless Claude, in the background."""
+        if any(r.get("status") == "ready_for_slack_draft" for r in results):
+            from services.slack_draft_worker import kick
+            kick(notify=self.notify_junior)
+
+    def _refresh_batch_status(self, batch_id) -> None:
+        """A hire's batch is just a summary of its 3 messages' own states."""
+        if not batch_id:
+            return
+        conn = get_db()
+        try:
+            statuses = [r[0] for r in conn.execute(
+                "SELECT status FROM messages WHERE batchId=?", (batch_id,)
+            ).fetchall()]
+            if not statuses:
+                return
+            if "pending_approval" in statuses:
+                new = "pending_approval"
+            elif all(s in ("rejected", "skipped") for s in statuses):
+                new = "rejected" if "rejected" in statuses else "skipped"
+            else:
+                new = "approved"
+            now = datetime.now().isoformat()
+            conn.execute(
+                "UPDATE batches SET status=?, "
+                "approvedAt=CASE WHEN ?='approved' THEN COALESCE(approvedAt, ?) ELSE approvedAt END, "
+                "rejectedAt=CASE WHEN ?='rejected' THEN COALESCE(rejectedAt, ?) ELSE rejectedAt END "
+                "WHERE id=?",
+                (new, new, now, new, now, batch_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def execute_batch(self, batch_id: int, notify: bool = True) -> dict:
+        """
+        (Re)prepares every approved-but-unprepared or failed message of a batch.
+        Used by the hourly retry; normal approvals go through approve_message.
+        """
+        conn = get_db()
+        try:
+            ids = [r["id"] for r in conn.execute(
+                # 'failed' too: retries a draft that failed before (e.g. Gmail
+                # was disconnected) instead of leaving it dead.
+                "SELECT id FROM messages WHERE batchId=? AND (status='approved' "
+                "OR (status='failed' AND employeeHireDate >= ?))",
+                (batch_id, datetime.now().strftime("%Y-%m-%d")),
+            ).fetchall()]
+        finally:
+            conn.close()
+        results = [self.prepare_message_draft(i) for i in ids]
+        self._refresh_batch_status(batch_id)
+        if notify and results:
+            self._notify_execution_result(batch_id, results)
+        prepared = sum(1 for r in results if r["status"] == "draft_created")
+        return {"executed": True, "prepared": prepared, "total": len(results), "results": results}
+
+    def _notify_execution_result(self, batch_id: int, results: list) -> None:
+        """
+        DMs Junior the outcome of every approved message right away — an
+        approval must never end silently with nothing created. Failures carry
+        the exact reason; Slack ones say plainly that the draft doesn't exist yet.
+        """
+        junior_id = os.getenv("JUNIOR_SLACK_ID", "")
+        slack_svc = self._kernel.get_service("slack_service")
+        if not results or not junior_id or not slack_svc:
+            return
+        emp_name = results[0].get("employeeName", "")
+        lines = [f"🐼 *Aprobaste mensajes de {emp_name}.* Esto es lo que quedó:"]
+        for r in results:
+            label = r.get("label") or self.MESSAGE_LABELS.get(r["type"], r["type"])
+            if r["type"] == "manager_slack" and r.get("managerName"):
+                label += f" ({r['managerName']})"
+            if r["status"] == "draft_created":
+                lines.append(f"✅ {label}: borrador creado en Gmail — ve y envíalo.")
+            elif r["status"] == "ready_for_slack_draft":
+                lines.append(f"⏳ {label}: aprobado — creando el borrador en Slack, te aviso apenas esté.")
+            elif r["status"] == "failed":
+                lines.append(f"❌ {label}: NO se creó — {r.get('error') or 'error desconocido'}")
+        if any(r["status"] == "failed" for r in results):
+            lines.append("\nLos que fallaron se reintentan automáticamente cada hora, o con 🔁 en el dashboard.")
+        try:
+            res = slack_svc.send_notification(junior_id, "\n".join(lines))
+            if res and not res.get("sent", True):
+                print(f"[Agent] Could not notify execution result: {res.get('error')}")
+        except Exception as e:
+            print(f"[Agent] Could not notify execution result: {e}")
 
     # ── OPERATIONS CENTER ────────────────────────────────────────
 

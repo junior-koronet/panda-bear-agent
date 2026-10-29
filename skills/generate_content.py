@@ -37,9 +37,11 @@ class GenerateEmailSkill(Skill):
                 f"Gracias por escribir. Confirmo que tu primer día es el {date_str}. ¡Ya falta poco!\n\n"
                 f"En los próximos días estarás recibiendo un correo de Jeisson, nuestro encargado de IT, "
                 f"con las instrucciones para configurar tu correo corporativo y una guía de configuración "
-                f"de herramientas. Una vez tengas acceso a ese correo, desde allí te estaremos enviando "
-                f"la citación formal para tu sesión de onboarding, que será aproximadamente a las "
-                f"{onboarding_time}.\n\n"
+                f"de herramientas.\n\n"
+                f"Para tu primer día, te recomiendo activar primero tu correo corporativo de Gmail y "
+                f"Slack, ya que serán las principales herramientas de comunicación y te permitirán ver "
+                f"en el calendario las reuniones que ya tienes agendadas. De hecho, ya tienes programada "
+                f"una sesión conmigo a las {onboarding_time}.\n\n"
                 f"Haremos todo lo posible para que todo fluya sin inconvenientes. "
                 f"Cualquier duda, aquí estamos.\n\n"
                 f"Un abrazo,\nJuni"
@@ -51,9 +53,11 @@ class GenerateEmailSkill(Skill):
                 f"Just wanted to confirm that your first day is {date_str}. "
                 f"We're so excited to have you on board!\n\n"
                 f"In the coming days, you'll be receiving an email from Jeisson, our IT coordinator, "
-                f"with instructions to set up your corporate email and a tools configuration guide. "
-                f"Once you have access to that email, we'll send you the formal invitation for your "
-                f"onboarding session, which will take place at approximately {onboarding_time}.\n\n"
+                f"with instructions to set up your corporate email and a tools configuration guide.\n\n"
+                f"For your first day, I'd recommend activating your corporate Gmail and Slack first, "
+                f"since they'll be your main communication tools and will let you see the meetings "
+                f"already scheduled on your calendar. In fact, you already have a session scheduled "
+                f"with me at {onboarding_time}.\n\n"
                 f"We'll do our best to make everything run smoothly. "
                 f"If you have any questions, don't hesitate to reach out!\n\n"
                 f"Best,\nJuni"
@@ -82,7 +86,28 @@ class GenerateSlackManagerSkill(Skill):
     category = "content"
 
     def _run(self, manager_name: str, employee_name: str, language: str = "es") -> dict:
-        first_name = manager_name.split(",")[0].strip() if manager_name else "there"
+        # manager_name arrives already resolved to a real first/preferred name
+        # (see skills/bamboo.py::resolve_manager_first_name) — no parsing here.
+        first_name = manager_name.strip() if manager_name else ""
+
+        if not first_name:
+            # This message goes to ONE specific person via DM — a generic
+            # "Hola equipo!" reads as finished when it isn't: there's no
+            # manager on file to actually send it to. Flag it instead of
+            # papering over the gap with a fake-sounding greeting.
+            content = (
+                f"⚠️ No se pudo generar este mensaje: {employee_name} no tiene un manager/supervisor "
+                f"asignado en BambooHR. Asígnalo ahí y vuelve a sincronizar, o edita este mensaje "
+                f"manualmente antes de aprobarlo."
+            )
+            return {
+                "result": content,
+                "messageType": "manager_slack",
+                "language": language,
+                "decision": f"No pude generar el mensaje al manager de {employee_name} — sin supervisor asignado en BambooHR",
+                "reasoning": "Sin un manager resuelto, un saludo genérico sonaría como un mensaje terminado sin serlo.",
+                "confidence": 0.3,
+            }
 
         if language == "es":
             content = (
@@ -120,10 +145,17 @@ class GenerateSlackBienvenidaSkill(Skill):
     description = "Generates the #Koronet channel welcome announcement for a new employee. Returns a draft for approval."
     category = "content"
 
-    def _run(self, first_name: str, last_name: str, job_title: str = "New Team Member") -> dict:
+    def _run(self, first_name: str, last_name: str, job_title: str = "New Team Member", gender: str = "") -> dict:
+        # BambooHR's "gender" field (Male/Female) drives the pronoun below — a
+        # sourced HR fact, not a guess. Falls back to "them" when absent/other,
+        # never guessed from the name.
+        pronoun = {"male": "him", "female": "her"}.get((gender or "").strip().lower(), "them")
+
         content = (
-            f"Hi team! @here A huge welcome to @{first_name} {last_name}, "
-            f"joining as {job_title}. We are so excited to have you with us! 🎉"
+            f"Hi team! 🎉 @here\n"
+            f"A huge welcome to @{first_name} {last_name}, joining as {job_title}.\n"
+            f"We're thrilled to have {pronoun} on board at Koronet! 💪\n"
+            f"Feel free to reach out on Slack and give {pronoun} the warmest welcome to the team 🚀"
         )
 
         return {

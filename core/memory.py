@@ -211,7 +211,7 @@ class AgentMemory:
                 VALUES (?, ?, ?, ?, ?, ?, ?)
             """, (
                 skill_name, decision, reasoning,
-                json.dumps(context) if context else None,
+                json.dumps(context, default=str) if context else None,
                 outcome, confidence, datetime.now().isoformat(),
             ))
             conn.commit()
@@ -291,7 +291,7 @@ class AgentMemory:
         finally:
             conn.close()
 
-    def get_conversation(self, session_id: str, limit: int = 20) -> list:
+    def get_conversation(self, session_id: str, limit: int = 500) -> list:
         conn = get_db()
         try:
             rows = conn.execute(

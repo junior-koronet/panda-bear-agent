@@ -6,38 +6,24 @@ The agent is the source of truth. The dashboard is just a window into the agent.
 
 import os
 from typing import Optional
-from fastapi import APIRouter, HTTPException, Depends, status
-from fastapi.security import HTTPBasic, HTTPBasicCredentials
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
-import secrets
 
+from api.auth import verify_session_or_basic
 from db.schema import get_db
 from datetime import datetime
 
-security = HTTPBasic()
-DASHBOARD_USER = os.getenv("DASHBOARD_USER", "junior@koronet.com")
-DASHBOARD_PASSWORD = os.getenv("DASHBOARD_PASSWORD", "koronet2024")
-
-router = APIRouter(prefix="/api")
+# Every route below requires a valid dashboard session (or Basic Auth for
+# scripts) — this is the entire attack surface for HR data, message
+# sending, and the personal assistant. See api/auth.py for the login flow.
+router = APIRouter(prefix="/api", dependencies=[Depends(verify_session_or_basic)])
 _agent = None  # Injected at startup
 
 
 def set_agent(agent):
     global _agent
     _agent = agent
-
-
-def verify_credentials(credentials: HTTPBasicCredentials = Depends(security)):
-    correct_user = secrets.compare_digest(credentials.username, DASHBOARD_USER)
-    correct_pass = secrets.compare_digest(credentials.password, DASHBOARD_PASSWORD)
-    if not (correct_user and correct_pass):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Credenciales incorrectas",
-            headers={"WWW-Authenticate": "Basic"},
-        )
-    return credentials.username
 
 
 # ── AGENT IDENTITY ──────────────────────────────────────────────
@@ -195,12 +181,35 @@ def recent_hires():
 
 @router.get("/agent/batches")
 def get_batches():
+    """
+    Every hire that still needs attention, each with its 3 messages and their
+    own state: anything pending approval, failed, or approved but whose Slack
+    draft hasn't been created yet — plus hires starting in the next days so
+    freshly approved ones stay visible with their per-draft result.
+    """
     conn = get_db()
     try:
+        # Past hires drop out once they've started (old failures are moot by then);
+        # anything still pending approval always shows.
+        today = datetime.now().strftime("%Y-%m-%d")
         batches = conn.execute(
-            "SELECT * FROM batches WHERE status='pending_approval' ORDER BY createdAt DESC"
+            """
+            SELECT b.*, MIN(m.employeeHireDate) AS hireDate FROM batches b
+            JOIN messages m ON m.batchId = b.id
+            GROUP BY b.id
+            HAVING SUM(m.status = 'pending_approval') > 0
+                OR (MIN(m.employeeHireDate) >= ? AND b.status != 'rejected')
+            ORDER BY MIN(m.employeeHireDate) ASC
+            """,
+            (today,),
         ).fetchall()
-        return [dict(b) for b in batches]
+        result = []
+        for b in batches:
+            msgs = conn.execute(
+                "SELECT * FROM messages WHERE batchId=? ORDER BY id", (b["id"],)
+            ).fetchall()
+            result.append({**dict(b), "messages": [dict(m) for m in msgs]})
+        return result
     finally:
         conn.close()
 
@@ -218,23 +227,69 @@ def get_batch(batch_id: int):
         conn.close()
 
 
+@router.post("/agent/batches/{batch_id}/photo")
+async def upload_batch_photo(batch_id: int, file: UploadFile = File(...)):
+    """
+    BambooHR had no photo for this hire when the batch was created — Junior
+    uploads one here and Panda Bear generates the flyer and attaches it to
+    every message in the batch that carries an image.
+    """
+    photo_bytes = await file.read()
+    if not photo_bytes:
+        raise HTTPException(status_code=400, detail="Archivo vacío")
+    result = _agent.attach_employee_photo(batch_id, photo_bytes)
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("error", "No se pudo generar el flyer"))
+    return result
+
+
 @router.post("/agent/batches/{batch_id}/approve")
 def approve_batch(batch_id: int):
-    result = _agent.invoke_skill("approval_workflow", action="approve_batch", batch_id=batch_id)
-    if result.get("result", {}).get("approved"):
-        exec_result = _agent.execute_batch(batch_id)
-        result["execution"] = exec_result
-    return result
+    """
+    "Aprobar todos": approves every still-pending message of this hire and
+    creates each draft. Approving NEVER sends (DECISIONS.md). Each message's
+    outcome (draft_created / ready_for_slack_draft / failed + reason) is in
+    `results`; a draft failure is reported there, never as an HTTP 500.
+    """
+    return _agent.approve_all(batch_id)
 
 
 @router.post("/agent/batches/{batch_id}/reject")
 def reject_batch(batch_id: int):
     result = _agent.invoke_skill("approval_workflow", action="reject_batch", batch_id=batch_id)
-    _agent.learn_from_batch(batch_id)
+    _agent._refresh_batch_status(batch_id)
+    try:
+        _agent.learn_from_batch(batch_id)
+    except Exception as e:
+        print(f"[routes] learn_from_batch failed for batch {batch_id}: {e}")
     return result
 
 
 # ── INDIVIDUAL MESSAGE ACTIONS ───────────────────────────────────
+
+@router.post("/agent/messages/{msg_id}/approve")
+def approve_message(msg_id: int):
+    """Approves ONE message and creates only its draft. The other two stay pending."""
+    result = _agent.approve_message(msg_id)
+    if result.get("status") is None and result.get("error"):
+        raise HTTPException(status_code=404, detail=result["error"])
+    return result
+
+
+@router.post("/agent/messages/{msg_id}/reject")
+def reject_message(msg_id: int):
+    result = _agent.invoke_skill("approval_workflow", action="reject_message", message_id=msg_id)
+    if not result.get("success"):
+        raise HTTPException(status_code=409, detail=result.get("error"))
+    _agent._refresh_batch_status(result.get("batchId"))
+    return result
+
+
+@router.post("/agent/messages/{msg_id}/retry")
+def retry_message(msg_id: int):
+    """Retries a failed draft right now (the hourly retry does the same automatically)."""
+    return _agent.prepare_message_draft(msg_id)
+
 
 class EditRequest(BaseModel):
     content: Optional[str] = None
@@ -248,6 +303,11 @@ def edit_message(msg_id: int, body: EditRequest):
         msg = conn.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
         if not msg:
             raise HTTPException(status_code=404, detail="Message not found")
+        if msg["status"] not in ("pending_approval", "failed"):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Solo se edita un mensaje pendiente o fallido (estado actual: {msg['status']})",
+            )
         if body.content:
             new_content = body.content
             reasoning = "HR manually edited the message"
@@ -288,19 +348,93 @@ def edit_message(msg_id: int, body: EditRequest):
 
 @router.post("/agent/messages/{msg_id}/skip")
 def skip_message(msg_id: int):
-    return _agent.invoke_skill("approval_workflow", action="skip_message", message_id=msg_id)
+    result = _agent.invoke_skill("approval_workflow", action="skip_message", message_id=msg_id)
+    if not result.get("success"):
+        raise HTTPException(status_code=409, detail=result.get("error"))
+    _agent._refresh_batch_status(result.get("batchId"))
+    return result
 
 
 @router.post("/agent/messages/{msg_id}/resend")
 def resend_message(msg_id: int):
+    """
+    "Ya lo envié": Junior confirms HE sent it himself. The only way a message
+    ever becomes 'sent' — and only once it actually got past approval, so a
+    pending/failed/rejected message can never be marked sent by mistake.
+    """
     conn = get_db()
     try:
-        conn.execute(
-            "UPDATE messages SET status='sent', sentAt=? WHERE id=?",
+        cur = conn.execute(
+            "UPDATE messages SET status='sent', sentAt=? WHERE id=? "
+            "AND status IN ('draft_created','ready_for_slack_draft')",
             (datetime.now().isoformat(), msg_id),
         )
         conn.commit()
+        if cur.rowcount == 0:
+            row = conn.execute("SELECT status FROM messages WHERE id=?", (msg_id,)).fetchone()
+            raise HTTPException(
+                status_code=409,
+                detail=f"No se puede marcar como enviado (estado actual: {row['status'] if row else 'no existe'})",
+            )
         return {"resent": True}
+    finally:
+        conn.close()
+
+
+@router.get("/agent/slack-drafts/pending")
+def pending_slack_drafts():
+    """
+    Messages approved and ready but not yet staged as real Slack drafts.
+    Panda Bear's bot can't create native Slack drafts (no public API for that) —
+    this list is what Junior asks Claude to turn into real Slack drafts, one
+    destination resolved per message so nothing needs a manual lookup.
+    """
+    conn = get_db()
+    try:
+        msgs = conn.execute(
+            "SELECT * FROM messages WHERE status='ready_for_slack_draft' ORDER BY createdAt"
+        ).fetchall()
+        slack_svc = _agent._kernel.get_service("slack_service")
+        bienvenidas_channel = os.getenv("BIENVENIDAS_CHANNEL", "koronet")
+
+        result = []
+        for m in msgs:
+            m = dict(m)
+            if m["messageType"] == "manager_slack":
+                manager_slack_id = m.get("slackTarget") or (
+                    slack_svc.find_user_by_name(m["managerName"])
+                    if slack_svc and m.get("managerName") else None
+                )
+                m["destination"] = {"kind": "dm", "managerName": m.get("managerName"), "slackUserId": manager_slack_id}
+            elif m["messageType"] == "bienvenidas_slack":
+                m["destination"] = {"kind": "channel", "channelName": bienvenidas_channel,
+                                    "channelId": m.get("slackTarget")}
+            result.append(m)
+
+        return {"result": result, "count": len(result)}
+    finally:
+        conn.close()
+
+
+@router.post("/agent/messages/{msg_id}/mark-drafted")
+def mark_slack_draft_created(msg_id: int):
+    """Called after a real Slack draft has been staged for this message, so it stops showing up as pending."""
+    conn = get_db()
+    try:
+        msg = conn.execute("SELECT * FROM messages WHERE id=?", (msg_id,)).fetchone()
+        if not msg:
+            raise HTTPException(status_code=404, detail="Message not found")
+        if msg["status"] not in ("ready_for_slack_draft", "draft_created"):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Solo un mensaje aprobado puede marcarse como borrador creado (estado: {msg['status']})",
+            )
+        conn.execute(
+            "UPDATE messages SET status='draft_created', deliveryError=NULL, deliveredAt=? WHERE id=?",
+            (datetime.now().isoformat(), msg_id),
+        )
+        conn.commit()
+        return {"updated": True}
     finally:
         conn.close()
 
@@ -354,9 +488,59 @@ def conversation(body: ConversationRequest):
     return {"reply": reply, "agent": "Panda Bear"}
 
 
+@router.get("/agent/conversation/personal")
+def get_personal_conversation():
+    """
+    History for the personal-assistant thread. Declared BEFORE the generic
+    /{session_id} route below so FastAPI matches this specific path first —
+    otherwise "personal" would be swallowed as a literal session_id.
+    think_personal() always keys memory by JUNIOR_SLACK_ID (shared between
+    Slack and the dashboard — one continuous personal-assistant thread,
+    not two parallel ones), so history lookup must use that same key.
+    """
+    junior_id = os.getenv("JUNIOR_SLACK_ID", "")
+    return _agent._memory.get_conversation(junior_id)
+
+
 @router.get("/agent/conversation/{session_id}")
 def get_conversation(session_id: str):
     return _agent._memory.get_conversation(session_id)
+
+
+@router.post("/agent/conversation/personal")
+def conversation_personal(body: ConversationRequest):
+    """
+    Talk to Panda Bear's personal assistant (calendar/email).
+    The dashboard is single-tenant (only Junior can log in), so a valid
+    session here already proves the caller is Junior — we pass his
+    JUNIOR_SLACK_ID through so think_personal's own identity check still passes.
+    """
+    junior_id = os.getenv("JUNIOR_SLACK_ID", "")
+    reply = _agent.think_personal(user_id=junior_id, text=body.message)
+    return {"reply": reply, "agent": "Panda Bear (Personal)"}
+
+
+# ── MEETING JOIN CONTROL ─────────────────────────────────────────
+
+class JoinMeetingRequest(BaseModel):
+    meetUrl: str
+    calendarEventId: Optional[str] = None
+    title: Optional[str] = None
+
+
+@router.post("/agent/meetings/join")
+def join_meeting(body: JoinMeetingRequest):
+    return _agent.join_meeting(meet_url=body.meetUrl, calendar_event_id=body.calendarEventId, title=body.title)
+
+
+@router.post("/agent/meetings/leave")
+def leave_meeting():
+    return _agent.leave_meeting()
+
+
+@router.get("/agent/meetings/status")
+def meeting_status():
+    return _agent.meeting_status()
 
 
 # ── MEMORY & LEARNING ────────────────────────────────────────────

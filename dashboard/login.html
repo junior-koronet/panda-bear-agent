@@ -1,0 +1,43 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Panda Bear — Iniciar sesión</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap');
+:root{--bg:#111;--card:#1a1a1a;--border:#2a2a2a;--teal:#00b8ad;--text:#fff;--text2:#999;--red:#dc2626}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;display:flex;align-items:center;justify-content:center}
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:36px 32px;width:340px;box-shadow:0 8px 30px rgba(0,0,0,.4)}
+.title{font-size:20px;font-weight:800;margin-bottom:4px}
+.title span{color:var(--teal)}
+.sub{font-size:13px;color:var(--text2);margin-bottom:24px}
+label{display:block;font-size:12px;color:var(--text2);margin-bottom:6px;margin-top:16px;font-weight:600}
+input{width:100%;background:#0d0d0d;border:1px solid var(--border);border-radius:8px;padding:11px 12px;color:var(--text);font-size:14px;font-family:inherit}
+input:focus{outline:none;border-color:var(--teal)}
+button{width:100%;margin-top:22px;background:var(--teal);color:#04211f;border:none;border-radius:8px;padding:12px;font-size:14px;font-weight:700;cursor:pointer;font-family:inherit}
+button:hover{opacity:.9}
+.error{margin-top:14px;font-size:12.5px;color:var(--red);text-align:center}
+</style>
+</head>
+<body>
+  <div class="card">
+    <div class="title">🐼 Panda <span>Bear</span></div>
+    <div class="sub">Inicia sesión para entrar al dashboard</div>
+    <form method="POST" action="/api/auth/login" autocomplete="on">
+      <label for="username">Usuario</label>
+      <input type="email" id="username" name="username" autocomplete="username" required autofocus />
+      <label for="password">Contraseña</label>
+      <input type="password" id="password" name="password" autocomplete="current-password" required />
+      <button type="submit">Entrar</button>
+    </form>
+    <div class="error" id="error" style="display:none">Usuario o contraseña incorrectos.</div>
+  </div>
+  <script>
+    if (new URLSearchParams(window.location.search).get('error')) {
+      document.getElementById('error').style.display = 'block';
+    }
+  </script>
+</body>
+</html>

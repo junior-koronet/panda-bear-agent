@@ -195,6 +195,32 @@ class SlackService(ServiceBase):
         except Exception:
             return None
 
+    def resolve_user_id(self, name: str) -> str | None:
+        """
+        Like find_user_by_name, but lets Slack API errors (invalid_auth,
+        missing_scope...) raise instead of returning None — so a bad token
+        surfaces as the real error, not as "user not found".
+        Matches the full real name first, then falls back to a partial match.
+        """
+        if not self._client:
+            raise RuntimeError("Slack client not initialized (SLACK_BOT_TOKEN)")
+        name_lower = name.lower().strip()
+        members = []
+        cursor = None
+        while True:
+            resp = self._client.users_list(cursor=cursor, limit=200)
+            members.extend(m for m in resp["members"] if not m.get("deleted") and not m.get("is_bot"))
+            cursor = (resp.get("response_metadata") or {}).get("next_cursor")
+            if not cursor:
+                break
+        for m in members:
+            if name_lower in (m.get("real_name", "").lower(), m.get("profile", {}).get("real_name", "").lower()):
+                return m["id"]
+        for m in members:
+            if name_lower in m.get("real_name", "").lower() or name_lower in m.get("name", "").lower():
+                return m["id"]
+        return None
+
     def post_to_channel(self, channel_name: str, text: str, file_path: str = None) -> dict:
         """Posts a message to a public Slack channel by name."""
         if not self._client:

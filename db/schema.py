@@ -181,6 +181,57 @@ def init_db():
     """)
 
     c.execute("""
+        CREATE TABLE IF NOT EXISTS pending_confirmations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            userId TEXT NOT NULL,
+            actionType TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            summary TEXT NOT NULL,
+            status TEXT DEFAULT 'pending',
+            createdAt TEXT NOT NULL,
+            resolvedAt TEXT
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            token TEXT PRIMARY KEY,
+            createdAt TEXT NOT NULL,
+            expiresAt TEXT NOT NULL
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS meeting_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT,
+            fathomMeetingId TEXT,
+            transcriptText TEXT,
+            summaryText TEXT,
+            rawActionItems TEXT,
+            status TEXT DEFAULT 'awaiting_format_choice',
+            outputFormat TEXT,
+            docLink TEXT,
+            slidesLink TEXT,
+            createdAt TEXT NOT NULL
+        )
+    """)
+
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS commitments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            meetingNoteId INTEGER,
+            description TEXT NOT NULL,
+            owner TEXT,
+            dueHint TEXT,
+            status TEXT DEFAULT 'open',
+            createdAt TEXT NOT NULL,
+            remindedAt TEXT,
+            FOREIGN KEY(meetingNoteId) REFERENCES meeting_notes(id)
+        )
+    """)
+
+    c.execute("""
         CREATE TABLE IF NOT EXISTS incidents (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             service TEXT NOT NULL,
@@ -212,6 +263,20 @@ def migrate_db():
         "ALTER TABLE messages ADD COLUMN retries INTEGER DEFAULT 0",
         "ALTER TABLE messages ADD COLUMN deliveryError TEXT",
         "ALTER TABLE messages ADD COLUMN deliveredAt TEXT",
+        "ALTER TABLE messages ADD COLUMN managerMessageDate TEXT",
+        "ALTER TABLE messages ADD COLUMN emailMessageDate TEXT",
+        "ALTER TABLE messages ADD COLUMN koronetMessageDate TEXT",
+        "ALTER TABLE messages ADD COLUMN remindedAt TEXT",
+        "ALTER TABLE messages ADD COLUMN draftNotifiedAt TEXT",
+        "ALTER TABLE batches ADD COLUMN photoStatus TEXT",
+        "ALTER TABLE batches ADD COLUMN bambooEmployeeId TEXT",
+        # Per-message approval (each of the 3 onboarding messages is approved
+        # on its own) + proof of what was actually created for it.
+        "ALTER TABLE messages ADD COLUMN approvedAt TEXT",
+        "ALTER TABLE messages ADD COLUMN draftId TEXT",
+        "ALTER TABLE messages ADD COLUMN ccEmail TEXT",
+        "ALTER TABLE messages ADD COLUMN slackTarget TEXT",
+        "ALTER TABLE messages ADD COLUMN slackDraftAttempts INTEGER DEFAULT 0",
     ]
     for sql in migrations:
         try:
@@ -219,4 +284,20 @@ def migrate_db():
             conn.commit()
         except Exception:
             pass
+
+    # One row per (hire, Colombia calendar day) a pending-approval reminder
+    # went out. The UNIQUE constraint is what guarantees "never more than one
+    # reminder per hire per day", even if two checks race each other.
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS hire_reminders (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batchId INTEGER NOT NULL,
+            reminderDate TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            pendingTypes TEXT,
+            sentAt TEXT NOT NULL,
+            UNIQUE(batchId, reminderDate)
+        )
+    """)
+    conn.commit()
     conn.close()

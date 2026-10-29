@@ -83,6 +83,16 @@ class GenerateImageSkill(Skill):
             output_path = os.path.join(IMAGES_DIR, f"welcome_{safe_name}.png")
             base.convert("RGB").save(output_path, quality=95)
 
+            # Also drop a copy in Downloads — Junior has to manually attach this
+            # flyer to Slack drafts (no API for that), and Downloads is a lot
+            # easier for him to find than this project's folder.
+            downloads_dir = os.path.join(os.path.expanduser("~"), "Downloads")
+            try:
+                if os.path.isdir(downloads_dir):
+                    base.convert("RGB").save(os.path.join(downloads_dir, f"welcome_{safe_name}.png"), quality=95)
+            except Exception as e:
+                print(f"[Image] Could not copy flyer to Downloads: {e}")
+
             return {
                 "result": output_path,
                 "imagePath": output_path,

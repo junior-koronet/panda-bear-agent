@@ -7,4 +7,10 @@ groq==0.9.0
 slack-sdk==3.31.0
 Pillow==10.4.0
 numpy==2.0.1
-python-multipart==0.0.9
+python-multipart==0.0.32
+google-auth==2.56.2
+google-auth-oauthlib==1.4.0
+google-api-python-client==2.198.0
+playwright==1.62.0
+pyaudiowpatch==0.2.12.8; sys_platform == "win32"
+tzdata==2026.3

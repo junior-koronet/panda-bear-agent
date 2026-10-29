@@ -1,4 +1,6 @@
 .env
+google_credentials.json
+google_token.json
 __pycache__/
 *.pyc
 *.pyo
@@ -8,3 +10,4 @@ panda_bear.db
 .DS_Store
 *.egg-info/
 
+logs/

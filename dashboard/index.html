@@ -64,6 +64,9 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
 .badge.failed{background:rgba(220,38,38,.1);color:var(--red)}
 .badge.skipped,.badge.rejected{background:rgba(153,153,153,.1);color:var(--text3)}
 .badge.completed{background:rgba(22,163,74,.1);color:var(--green)}
+.badge.approved{background:rgba(22,163,74,.1);color:var(--green)}
+.badge.draft_created{background:rgba(37,99,235,.1);color:var(--blue,#2563eb)}
+.badge.ready_for_slack_draft{background:rgba(217,119,6,.1);color:var(--yellow)}
 .act-btn{background:var(--bg3);border:1px solid var(--border);color:var(--text2);border-radius:5px;padding:4px 9px;font-size:11px;font-weight:600;cursor:pointer;font-family:'Outfit',sans-serif;transition:all .15s;margin-right:4px}
 .act-btn:hover{border-color:var(--teal);color:var(--teal)}
 .act-btn.approve:hover{border-color:var(--green);color:var(--green)}
@@ -177,7 +180,7 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
   <div class="logo">
     <div class="logo-title">Panda <span>Bear</span></div>
     <div class="logo-sub">People Ops Agent · Koronet</div>
-    <div class="logo-badge">v4.0 AGENT</div>
+    <div class="logo-badge">v4.1 · APROBACIÓN POR MENSAJE</div>
   </div>
   <div class="nav">
     <div class="nav-section">Oficina</div>
@@ -203,6 +206,9 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
     <div style="font-weight:600;color:#ccc;margin-bottom:2px">Junior Osorio</div>
     <div>People Operations · Koronet</div>
     <div style="color:#444">junior@koronet.com</div>
+    <form method="POST" action="/api/auth/logout" style="margin-top:8px">
+      <button type="submit" style="background:none;border:none;color:#666;font-size:11px;cursor:pointer;padding:0;font-family:inherit;text-decoration:underline">Cerrar sesión</button>
+    </form>
   </div>
 </nav>
 
@@ -218,7 +224,7 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
 <script>
 const BASE = window.location.origin;
 let currentPage = 'brief';
-let chatSession = 'hr_' + Date.now();
+let chatMode = 'hr';
 let toastTimer = null;
 
 function showToast(msg, d=3500) {
@@ -230,7 +236,12 @@ function showToast(msg, d=3500) {
 
 async function api(path, opts={}) {
   const r = await fetch(BASE + '/api' + path, {headers:{'Content-Type':'application/json'}, ...opts});
-  if (!r.ok) throw new Error('HTTP ' + r.status);
+  if (r.status === 401) { window.location.href = '/login'; return; }
+  if (!r.ok) {
+    let detail = '';
+    try { const b = await r.json(); detail = b && b.detail ? (typeof b.detail === 'string' ? b.detail : JSON.stringify(b.detail)) : ''; } catch(_) {}
+    throw new Error('HTTP ' + r.status + (detail ? ' — ' + detail : ''));
+  }
   return r.json();
 }
 
@@ -252,7 +263,7 @@ function render(page) {
   }[page] || renderBrief)();
 }
 
-const BADGES = {sent:'✓ Sent',pending:'⏳ Pending',pending_approval:'👁 Awaiting',failed:'✗ Failed',skipped:'⏭ Skipped',rejected:'✗ Rejected',running:'⟳ Running',completed:'✓ Done'};
+const BADGES = {sent:'📤 Enviado por ti',approved:'⟳ Creando borrador…',pending:'⏳ Pending',pending_approval:'⏳ Pendiente de aprobación',failed:'✗ Falló — no se creó',skipped:'⏭ Omitido',rejected:'✗ Rechazado',running:'⟳ Running',completed:'✓ Done',draft_created:'📝 Borrador creado',ready_for_slack_draft:'⟳ Creando borrador en Slack…'};
 const TYPE_LABEL = {employee_email:'📧 Correo Empleado',manager_slack:'💬 Slack Manager',bienvenidas_slack:'🎉 #Koronet'};
 function badge(s){return `<span class="badge ${s}">${BADGES[s]||s}</span>`}
 function esc(s){return(s||'').replace(/`/g,'\\`').replace(/\$/g,'\\$')}
@@ -302,7 +313,7 @@ async function renderBrief() {
     if (!brief.recentMessages) {
       const stats = await api('/agent/stats');
       const tbody = c.querySelector('tbody');
-      if (tbody && stats.recentMessages) tbody.innerHTML = stats.recentMessages.slice(0,5).map(m=>msgRow(m)).join('');
+      if (tbody && stats.recentMessages) tbody.innerHTML = stats.recentMessages.slice(0,5).map(m=>msgTableRow(m)).join('');
     }
   } catch(e) {
     c.innerHTML = `<div class="section"><div class="empty"><div class="icon">⚠️</div>No se pudo conectar al agente.<br><small>${e.message}</small></div></div>`;
@@ -314,10 +325,11 @@ function renderInt(name, s) {
 }
 
 function renderMsgTable(msgs) {
-  return `<table class="table"><thead><tr><th>Empleado</th><th>Tipo</th><th>Manager</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody>${msgs.map(m=>msgRow(m)).join('')}</tbody></table>`;
+  return `<table class="table"><thead><tr><th>Empleado</th><th>Tipo</th><th>Manager</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody>${msgs.map(m=>msgTableRow(m)).join('')}</tbody></table>`;
 }
 
-function msgRow(m) {
+// Row of the Messages / Morning Brief tables. NOT the approval card (msgRow below).
+function msgTableRow(m) {
   return `<tr>
     <td><div style="font-weight:600">${m.employeeName}</div><div style="font-size:11px;color:var(--text3)">${m.employeeJobTitle||''}</div></td>
     <td style="font-size:12px;color:var(--teal)">${TYPE_LABEL[m.messageType]||m.messageType}</td>
@@ -329,6 +341,8 @@ function msgRow(m) {
       ${m.status==='pending_approval'?`<button class="act-btn" onclick="openEdit(${m.id},\`${esc(m.messageContent)}\`,'${m.employeeName}')">✏️</button>`:''}
       ${m.status==='pending_approval'?`<button class="act-btn" onclick="testDm(${m.id})">🔔</button>`:''}
       ${m.status==='pending_approval'?`<button class="act-btn" onclick="skipMsg(${m.id})">⏭</button>`:''}
+      ${m.status==='failed'?`<button class="act-btn" onclick="retryMsg(${m.id})">🔁 Reintentar</button>`:''}
+      ${(m.status==='draft_created'||m.status==='ready_for_slack_draft')?`<button class="act-btn" onclick="markSent(${m.id})" title="Marcar como ya enviado por ti">✓ Ya lo envié</button>`:''}
     </td></tr>`;
 }
 
@@ -336,34 +350,144 @@ function msgRow(m) {
 async function renderApprovals() {
   const c = document.getElementById('page-content');
   try {
-    const batches = await api('/agent/batches');
+    const hires = await api('/agent/batches');
     c.innerHTML = `
-      <div class="page-header"><div class="page-title">Pending Approvals</div><div class="page-sub">El agente preparó estos mensajes. Nada fue enviado todavía.</div></div>
-      ${batches.length === 0
-        ? '<div class="section"><div class="empty"><div class="icon">✅</div>No hay mensajes pendientes de aprobación. Excelente!</div></div>'
-        : batches.map(b => `
-          <div class="approval-card">
-            <div class="approval-card-title">⏳ ${b.employeeName || 'Batch #'+b.id} — ${b.messageCount} mensaje(s)</div>
-            <div class="approval-card-sub">Preparado el ${new Date(b.createdAt).toLocaleString()}. Esperando tu revisión antes de enviar.</div>
-            <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <button class="act-btn approve" onclick="approveBatch(${b.id})">✅ Aprobar & Enviar</button>
-              <button class="act-btn reject" onclick="rejectBatch(${b.id})">❌ Rechazar</button>
-              <button class="act-btn" onclick="reviewBatch(${b.id})">👁 Revisar Mensajes</button>
-            </div>
-          </div>`).join('')}`;
-  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
+      <div class="page-header"><div class="page-title">Aprobaciones</div><div class="page-sub">Aprobar = crear el borrador. Nada se envía solo: tú revisas cada borrador y le das Enviar.</div></div>
+      ${hires.length === 0
+        ? '<div class="section"><div class="empty"><div class="icon">✅</div>No hay ingresos con mensajes pendientes.</div></div>'
+        : hires.map(hireCard).join('')}`;
+  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${escapeHtml(e.message)}</div></div>`; }
+}
+
+const MSG_ORDER = {manager_slack:0, bienvenidas_slack:1, employee_email:2};
+const MSG_TITLE = {manager_slack:'💬 Mensaje al líder (borrador en Slack DM)', bienvenidas_slack:'🎉 Bienvenida en #koronet (borrador en Slack)', employee_email:'📧 Correo de bienvenida (borrador en Gmail)'};
+
+function hireCard(b) {
+  const msgs = (b.messages||[]).slice().sort((x,y)=>(MSG_ORDER[x.messageType]??9)-(MSG_ORDER[y.messageType]??9));
+  const pending = msgs.filter(m=>m.status==='pending_approval').length;
+  const hire = b.hireDate ? new Date(b.hireDate+'T12:00:00').toLocaleDateString('es-CO',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'}) : '—';
+  return `
+    <div class="approval-card">
+      <div class="approval-card-title">${pending?'⏳':'✅'} ${escapeHtml(b.employeeName || 'Batch #'+b.id)} — ingresa el ${hire}</div>
+      <div class="approval-card-sub">${pending} de ${msgs.length} mensaje(s) pendientes de aprobación.</div>
+      ${b.photoStatus==='missing'?`<div style="background:rgba(217,119,6,.1);border:1px solid var(--yellow);border-radius:10px;padding:10px 14px;margin-bottom:10px">
+        ⚠️ Sin foto en BambooHR — el flyer no se generó. <input type="file" id="photo-input-${b.id}" accept="image/*"> <button class="act-btn" onclick="uploadBatchPhoto(${b.id})">📎 Subir foto</button></div>`:''}
+      ${msgs.map(msgRow).join('')}
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
+        ${pending?`<button class="act-btn approve" onclick="approveBatch(${b.id})">✅ Aprobar todos (${pending})</button>
+        <button class="act-btn reject" onclick="rejectBatch(${b.id})">❌ Rechazar todos los pendientes</button>`:''}
+      </div>
+    </div>`;
+}
+
+function msgRow(m) {
+  const pend = m.status==='pending_approval';
+  const editable = pend || m.status==='failed';
+  let info = '';
+  if (m.status==='failed') info = `<div style="color:var(--red);font-size:12px;margin-top:6px">❌ No se creó: ${escapeHtml(m.deliveryError||'error desconocido')}</div>`;
+  else if (m.status==='draft_created') info = `<div style="color:var(--green);font-size:12px;margin-top:6px">✅ Borrador creado${m.messageType==='employee_email'?` en Gmail para ${escapeHtml(m.employeeEmail||'')}${m.ccEmail?' (CC '+escapeHtml(m.ccEmail)+')':''}`:' en Slack'} — revísalo y dale Enviar.</div>`;
+  else if (m.status==='ready_for_slack_draft') info = `<div style="color:var(--yellow);font-size:12px;margin-top:6px">⟳ Aprobado — el borrador se está creando en Slack (~1 min). Te aviso por DM cuando esté o si falla.${m.deliveryError?' Último intento: '+escapeHtml(m.deliveryError):''}</div>`;
+  return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:14px;margin-bottom:10px">
+    <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <span style="font-weight:700;font-size:13px">${MSG_TITLE[m.messageType]||m.messageType}${m.messageType==='manager_slack'&&m.managerName?' — '+escapeHtml(m.managerName):''}</span>
+      ${badge(m.status)}
+    </div>
+    <div class="msg-preview" style="max-height:160px;overflow:auto">${escapeHtml(m.messageContent||'').replace(/\n/g,'<br>')}</div>
+    ${info}
+    <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">
+      ${pend?`<button class="act-btn approve" onclick="approveMsg(${m.id})">✅ Aprobar</button>`:''}
+      ${editable?`<button class="act-btn" onclick="openEdit(${m.id},\`${esc(m.messageContent)}\`,'${escapeHtml(m.employeeName)}')">✏️ Editar</button>`:''}
+      ${editable?`<button class="act-btn" onclick="skipMsg(${m.id})">⏭ Omitir</button>`:''}
+      ${editable?`<button class="act-btn reject" onclick="rejectMsg(${m.id})">❌ Rechazar</button>`:''}
+      ${m.status==='failed'?`<button class="act-btn approve" onclick="retryMsg(${m.id})">🔁 Reintentar</button>`:''}
+      ${(m.status==='draft_created'||m.status==='ready_for_slack_draft')?`<button class="act-btn" onclick="markSent(${m.id})">✓ Ya lo envié</button>`:''}
+    </div>
+  </div>`;
+}
+
+function showDraftResults(title, results) {
+  const icon = r => r.status==='draft_created'?'✅':r.status==='ready_for_slack_draft'?'⚠️':r.status==='failed'?'❌':'ℹ️';
+  const text = r => r.status==='draft_created' ? (r.note||'Borrador creado')
+    : r.status==='failed' ? 'NO se creó — '+(r.error||'error desconocido')
+    : r.status==='ready_for_slack_draft' ? (r.note||'Aprobado, falta crear el borrador en Slack')
+    : (r.error||r.note||r.status);
+  document.getElementById('modal-content').innerHTML = `
+    <div class="modal-title">${escapeHtml(title)}</div>
+    ${(results||[]).map(r=>`<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px;margin-bottom:10px">
+      <div style="font-weight:700;margin-bottom:4px">${icon(r)} ${escapeHtml(r.label||TYPE_LABEL[r.type]||r.type||'Mensaje')}</div>
+      <div style="font-size:13px;color:var(--text2)">${escapeHtml(text(r))}</div></div>`).join('') || '<div class="empty">No había mensajes pendientes.</div>'}
+    <div class="modal-actions"><button class="btn-primary" style="padding:8px 16px;font-size:13px" onclick="closeModal()">Entendido</button></div>`;
+  document.getElementById('modal').style.display='flex';
+}
+
+async function approveMsg(id) {
+  try {
+    const r = await api(`/agent/messages/${id}/approve`, {method:'POST'});
+    showDraftResults('Resultado de la aprobación', [r]);
+  } catch(e) { showToast('❌ Error: '+escapeHtml(e.message), 8000); }
+  if (currentPage==='approvals') renderApprovals(); else render(currentPage);
+}
+
+async function rejectMsg(id) {
+  if (!confirm('¿Rechazar este mensaje? No se creará su borrador.')) return;
+  try { await api(`/agent/messages/${id}/reject`, {method:'POST'}); showToast('🚫 Rechazado.'); }
+  catch(e) { showToast('❌ Error: '+escapeHtml(e.message), 8000); }
+  render(currentPage);
+}
+
+async function retryMsg(id) {
+  try {
+    const r = await api(`/agent/messages/${id}/retry`, {method:'POST'});
+    showDraftResults('Resultado del reintento', [r]);
+  } catch(e) { showToast('❌ Error: '+escapeHtml(e.message), 8000); }
+  render(currentPage);
 }
 
 // ── CONVERSATION ──────────────────────────────────────────────────
-function renderConversation() {
+const CHAT_MODES = {
+  hr: {
+    label: 'RR.HH.',
+    greeting: 'Hola! Soy Panda Bear, tu agente de People Operations. Puedo consultarte información de BambooHR, explicar mis decisiones, generar versiones alternativas de mensajes, o simplemente conversar sobre el equipo. ¿En qué puedo ayudarte?',
+    suggestions: ['¿Quién ingresa esta semana?','Soy Panda Bear, ¿quién eres?','¿Cuántos empleados hay en Koronet?','¿Qué mensajes tienes pendientes de aprobación?','Muéstrame los próximos ingresos'],
+    endpoint: '/agent/conversation',
+    // Fixed, not time-based — this dashboard is single-tenant (only Junior),
+    // so one persistent thread per mode is exactly "conserva todo lo que hago".
+    sessionId: 'hr_junior_dashboard',
+    historyPath: '/agent/conversation/hr_junior_dashboard',
+  },
+  personal: {
+    label: 'Personal',
+    greeting: 'Hola Junior 🐼 En este modo soy tu asistente personal — puedo revisar tu calendario, tus correos pendientes, o agendarte una reunión. Si agendo algo con invitados, siempre te pido confirmación antes de enviar la invitación.',
+    suggestions: ['¿Qué tengo en mi calendario hoy?','Revisa mis correos pendientes','Agéndame un bloque de foco mañana de 9 a 10'],
+    endpoint: '/agent/conversation/personal',
+    // think_personal() always keys memory by JUNIOR_SLACK_ID (shared with Slack —
+    // one continuous thread), not by a dashboard-only session id, so history is
+    // read from a dedicated endpoint instead of /agent/conversation/{sessionId}.
+    historyPath: '/agent/conversation/personal',
+  },
+};
+
+function escapeHtml(s) {
+  const d = document.createElement('div');
+  d.textContent = s == null ? '' : String(s);
+  return d.innerHTML;
+}
+
+async function renderConversation() {
   const c = document.getElementById('page-content');
+  const mode = CHAT_MODES[chatMode];
   c.innerHTML = `
     <div class="page-header"><div class="page-title">Conversation</div><div class="page-sub">Habla directamente con Panda Bear. Consulta, pide cambios, explora datos.</div></div>
     <div class="section">
-      <div class="section-header"><div class="section-title">🐼 Panda Bear</div><div style="font-size:11px;color:var(--text3)">Powered by Groq AI · llama-3.3-70b</div></div>
+      <div class="section-header">
+        <div class="section-title">🐼 Panda Bear — ${mode.label}</div>
+        <div style="display:flex;gap:6px">
+          ${Object.keys(CHAT_MODES).map(k => `<button class="act-btn" style="font-size:12px;${k===chatMode?'font-weight:700;border-color:var(--accent,#666)':''}" onclick="switchChatMode('${k}')">${CHAT_MODES[k].label}</button>`).join('')}
+        </div>
+      </div>
       <div class="chat-wrapper">
         <div class="chat-messages" id="chat-messages">
-          <div class="chat-msg assistant">Hola! Soy Panda Bear, tu agente de People Operations. Puedo consultarte información de BambooHR, explicar mis decisiones, generar versiones alternativas de mensajes, o simplemente conversar sobre el equipo. ¿En qué puedo ayudarte?</div>
+          <div class="chat-msg assistant"><span class="spinner"></span> Cargando historial...</div>
         </div>
         <div class="chat-input-row">
           <input class="chat-input" id="chat-input" type="text" placeholder="Ej: ¿Quién ingresa esta semana? / ¿Por qué decidiste este mensaje? / Panda, genera una versión más cálida..." onkeydown="if(event.key==='Enter')sendChat()"/>
@@ -374,9 +498,26 @@ function renderConversation() {
     <div class="section">
       <div class="section-header"><div class="section-title">Sugerencias de conversación</div></div>
       <div style="padding:14px 18px;display:flex;gap:8px;flex-wrap:wrap">
-        ${['¿Quién ingresa esta semana?','Soy Panda Bear, ¿quién eres?','¿Cuántos empleados hay en Koronet?','¿Qué mensajes tienes pendientes de aprobación?','Muéstrame los próximos ingresos'].map(s=>`<button class="act-btn" style="font-size:12px" onclick="setChat('${s}')">${s}</button>`).join('')}
+        ${mode.suggestions.map(s=>`<button class="act-btn" style="font-size:12px" onclick="setChat('${s}')">${s}</button>`).join('')}
       </div>
     </div>`;
+
+  const msgs = document.getElementById('chat-messages');
+  try {
+    const history = await api(mode.historyPath);
+    msgs.innerHTML = (history && history.length)
+      ? history.map(m => `<div class="chat-msg ${m.role === 'user' ? 'user' : 'assistant'}">${escapeHtml(m.content).replace(/\n/g,'<br>')}</div>`).join('')
+      : `<div class="chat-msg assistant">${mode.greeting}</div>`;
+  } catch (e) {
+    msgs.innerHTML = `<div class="chat-msg assistant">${mode.greeting}</div>`;
+  }
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function switchChatMode(mode) {
+  if (mode === chatMode) return;
+  chatMode = mode;
+  renderConversation();
 }
 
 function setChat(text) {
@@ -391,14 +532,15 @@ async function sendChat() {
   input.value = '';
 
   const msgs = document.getElementById('chat-messages');
-  msgs.innerHTML += `<div class="chat-msg user">${text}</div>`;
+  msgs.innerHTML += `<div class="chat-msg user">${escapeHtml(text)}</div>`;
   msgs.innerHTML += `<div class="chat-msg assistant" id="thinking"><span class="spinner"></span> Pensando...</div>`;
   msgs.scrollTop = msgs.scrollHeight;
 
   try {
-    const r = await api('/agent/conversation', {method:'POST', body:JSON.stringify({message:text, sessionId:chatSession})});
+    const mode = CHAT_MODES[chatMode];
+    const r = await api(mode.endpoint, {method:'POST', body:JSON.stringify({message:text, sessionId:mode.sessionId})});
     document.getElementById('thinking').remove();
-    msgs.innerHTML += `<div class="chat-msg assistant">${r.reply.replace(/\n/g,'<br>')}</div>`;
+    msgs.innerHTML += `<div class="chat-msg assistant">${escapeHtml(r.reply).replace(/\n/g,'<br>')}</div>`;
   } catch(e) {
     document.getElementById('thinking').remove();
     msgs.innerHTML += `<div class="chat-msg assistant" style="color:var(--red)">❌ Error: ${e.message}</div>`;
@@ -764,13 +906,13 @@ async function renderExecution() {
   const c = document.getElementById('page-content');
   try {
     const msgs = await api('/agent/execution-history');
-    const delivered = msgs.filter(m=>m.status==='delivered'||m.status==='sent').length;
+    const prepared = msgs.filter(m=>m.status==='draft_created'||m.status==='ready_for_slack_draft').length;
     const failed = msgs.filter(m=>m.status==='failed').length;
     c.innerHTML = `
-      <div class="page-header"><div class="page-title">Execution History</div><div class="page-sub">Audit trail completo de cada envío — cada éxito, cada fallo</div></div>
+      <div class="page-header"><div class="page-title">Execution History</div><div class="page-sub">Audit trail completo — qué se preparó y qué falló (Panda Bear nunca envía, solo prepara)</div></div>
       <div class="stats-grid">
         <div class="stat-card"><div class="stat-label">Total Registros</div><div class="stat-value">${msgs.length}</div></div>
-        <div class="stat-card"><div class="stat-label">Enviados</div><div class="stat-value" style="color:var(--green)">${delivered}</div></div>
+        <div class="stat-card"><div class="stat-label">Preparados</div><div class="stat-value" style="color:var(--green)">${prepared}</div></div>
         <div class="stat-card"><div class="stat-label">Fallidos</div><div class="stat-value" style="color:${failed>0?'var(--red)':'var(--text)'}">${failed}</div></div>
         <div class="stat-card"><div class="stat-label">Pendientes</div><div class="stat-value" style="color:var(--purple)">${msgs.filter(m=>m.status==='pending_approval'||m.status==='pending').length}</div></div>
       </div>
@@ -858,37 +1000,51 @@ async function runSync(dry) {
 }
 
 async function approveBatch(id) {
-  try{await api(`/agent/batches/${id}/approve`,{method:'POST'});showToast('✅ Aprobado!');render(currentPage);}
-  catch(e){showToast('❌ Error: '+e.message);}
+  try{
+    const r=await api(`/agent/batches/${id}/approve`,{method:'POST'});
+    showDraftResults('Aprobar todos — resultado por borrador', r.results||[]);
+  }
+  catch(e){showToast('❌ Error: '+escapeHtml(e.message), 8000);}
+  render(currentPage);
 }
 async function rejectBatch(id) {
-  try{await api(`/agent/batches/${id}/reject`,{method:'POST'});showToast('🚫 Rechazado.');render(currentPage);}
-  catch(e){showToast('❌ Error: '+e.message);}
+  if (!confirm('¿Rechazar todos los mensajes pendientes de este ingreso?')) return;
+  try{await api(`/agent/batches/${id}/reject`,{method:'POST'});showToast('🚫 Rechazados.');render(currentPage);}
+  catch(e){showToast('❌ Error: '+escapeHtml(e.message), 8000);}
 }
 async function reviewBatch(id) {
   try {
     const batch = await api(`/agent/batches/${id}`);
-    const msgs = batch.messages||[];
-    const typeLabel={employee_email:'📧 Correo Empleado',manager_slack:'💬 Slack Manager',bienvenidas_slack:'🎉 #Koronet'};
+    const msgs = (batch.messages||[]).slice().sort((x,y)=>(MSG_ORDER[x.messageType]??9)-(MSG_ORDER[y.messageType]??9));
+    const pending = msgs.filter(m=>m.status==='pending_approval').length;
     document.getElementById('modal-content').innerHTML=`
-      <div class="modal-title">👁 ${batch.employeeName||'Batch #'+id} — ${msgs.length} mensaje(s)</div>
-      ${msgs.map(m=>`<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:16px;margin-bottom:14px">
-        <div style="display:flex;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px">
-          <span style="font-weight:700">${m.employeeName}</span>
-          <span style="font-size:12px;color:var(--teal);font-weight:600">${typeLabel[m.messageType]||m.messageType}</span>
-        </div>
-        <div class="msg-preview">${(m.messageContent||'').replace(/\n/g,'<br>')}</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <button class="act-btn" onclick="openEdit(${m.id},\`${esc(m.messageContent)}\`,'${m.employeeName}')">✏️ Editar</button>
-          <button class="act-btn" onclick="testDm(${m.id})">🔔 Test DM</button>
-          <button class="act-btn" onclick="skipMsg(${m.id})">⏭ Saltar</button>
-        </div>
-      </div>`).join('')}
+      <div class="modal-title">👁 ${escapeHtml(batch.employeeName||'Batch #'+id)} — ${pending} de ${msgs.length} pendiente(s)</div>
+      ${batch.photoStatus==='missing'?`
+      <div style="background:rgba(217,119,6,.1);border:1px solid var(--yellow);border-radius:10px;padding:12px 16px;margin-bottom:14px">
+        <div style="font-weight:600;margin-bottom:8px">⚠️ Sin foto en BambooHR — el flyer no se generó (no queremos el círculo en negro).</div>
+        <input type="file" id="photo-input-${id}" accept="image/*" style="margin-bottom:8px">
+        <button class="act-btn" onclick="uploadBatchPhoto(${id})">📎 Subir foto y generar flyer</button>
+      </div>`:''}
+      ${msgs.map(msgRow).join('')}
       <div class="modal-actions">
         <button class="btn-secondary" style="padding:8px 16px;font-size:13px" onclick="closeModal()">Cerrar</button>
-        <button class="btn-primary" style="padding:8px 16px;font-size:13px" onclick="approveBatch(${id});closeModal()">✅ Aprobar Todos</button>
+        ${pending?`<button class="btn-primary" style="padding:8px 16px;font-size:13px" onclick="closeModal();approveBatch(${id})">✅ Aprobar todos (${pending})</button>`:''}
       </div>`;
     document.getElementById('modal').style.display='flex';
+  } catch(e){showToast('❌ Error: '+e.message);}
+}
+
+async function uploadBatchPhoto(id){
+  const input = document.getElementById(`photo-input-${id}`);
+  const file = input && input.files[0];
+  if(!file){showToast('❌ Elegí un archivo primero');return;}
+  const fd = new FormData();
+  fd.append('file', file);
+  try{
+    const r = await fetch(BASE + `/api/agent/batches/${id}/photo`, {method:'POST', body:fd});
+    if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(e.detail||('HTTP '+r.status));}
+    showToast('✅ Flyer generado!');
+    reviewBatch(id);
   } catch(e){showToast('❌ Error: '+e.message);}
 }
 
@@ -923,8 +1079,14 @@ async function testDm(id){
 }
 
 async function skipMsg(id){
-  try{await api(`/agent/messages/${id}/skip`,{method:'POST'});showToast('⏭ Saltado.');render(currentPage);}
-  catch(e){showToast('❌ Error: '+e.message);}
+  try{await api(`/agent/messages/${id}/skip`,{method:'POST'});showToast('⏭ Omitido.');render(currentPage);}
+  catch(e){showToast('❌ Error: '+escapeHtml(e.message), 8000);}
+}
+
+async function markSent(id){
+  if (!confirm('Confirma solo si TÚ ya enviaste este mensaje. Panda Bear nunca lo envía por ti.')) return;
+  try{await api(`/agent/messages/${id}/resend`,{method:'POST'});showToast('✅ Marcado como enviado por ti.');render(currentPage);}
+  catch(e){showToast('❌ Error: '+escapeHtml(e.message), 8000);}
 }
 
 function viewMsg(id,content,name,status){

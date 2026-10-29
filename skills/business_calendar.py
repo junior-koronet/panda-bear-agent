@@ -12,9 +12,23 @@ class BusinessCalendarSkill(Skill):
     description = "Calculates the optimal date to notify a manager before an employee starts."
     category = "planning"
 
-    # Days before hire_date to send the manager notification, by weekday
-    # Monday=0 ... Friday=4
-    DAYS_BACK = {0: 4, 1: 4, 2: 5, 3: 3, 4: 3}
+    # Business days (Mon-Fri, weekends skipped) before hire_date for each
+    # message type — confirmed with Junior against Mon/Tue/Wed hire-date
+    # examples: manager=3, email ("Tu aventura...")=2, #koronet channel=1.
+    MANAGER_DAYS_BACK = 3
+    EMAIL_DAYS_BACK = 2
+    KORONET_DAYS_BACK = 1
+
+    @staticmethod
+    def _n_business_days_before(d: datetime, n: int) -> datetime:
+        """Steps back n business days (skips Saturday/Sunday each step)."""
+        cur = d
+        counted = 0
+        while counted < n:
+            cur -= timedelta(days=1)
+            if cur.weekday() < 5:  # Monday=0 ... Friday=4
+                counted += 1
+        return cur
 
     def _run(self, hire_date: str) -> dict:
         try:
@@ -26,8 +40,9 @@ class BusinessCalendarSkill(Skill):
             }
 
         weekday = hd.weekday()
-        days_back = self.DAYS_BACK.get(weekday, 3)
-        send_date = hd - timedelta(days=days_back)
+        send_date = self._n_business_days_before(hd, self.MANAGER_DAYS_BACK)
+        email_send_date = self._n_business_days_before(hd, self.EMAIL_DAYS_BACK)
+        koronet_send_date = self._n_business_days_before(hd, self.KORONET_DAYS_BACK)
 
         days_until_hire = (hd - datetime.today()).days
 
@@ -36,13 +51,20 @@ class BusinessCalendarSkill(Skill):
                 "hireDate": hire_date,
                 "managerNotifyDate": send_date.strftime("%Y-%m-%d"),
                 "managerNotifyFormatted": send_date.strftime("%d/%m/%Y"),
-                "daysBeforeHire": days_back,
+                "daysBeforeHire": self.MANAGER_DAYS_BACK,
+                "emailNotifyDate": email_send_date.strftime("%Y-%m-%d"),
+                "emailNotifyFormatted": email_send_date.strftime("%d/%m/%Y"),
+                "koronetNotifyDate": koronet_send_date.strftime("%Y-%m-%d"),
+                "koronetNotifyFormatted": koronet_send_date.strftime("%d/%m/%Y"),
                 "daysUntilHire": days_until_hire,
             },
-            "decision": f"Notify manager on {send_date.strftime('%d/%m/%Y')} ({days_back} days before hire date)",
+            "decision": f"Notify manager on {send_date.strftime('%d/%m/%Y')} ({self.MANAGER_DAYS_BACK} business days before hire date)",
             "reasoning": (
                 f"Employee starts on {hd.strftime('%A %d/%m/%Y')} (weekday={weekday}). "
-                f"Rule: notify {days_back} business days before to give manager enough preparation time."
+                f"Rule: manager notified {self.MANAGER_DAYS_BACK} business days before, "
+                f"onboarding email {self.EMAIL_DAYS_BACK} business days before, "
+                f"#koronet channel welcome {self.KORONET_DAYS_BACK} business day before — "
+                f"all counted skipping weekends, never calendar days."
             ),
         }
 
