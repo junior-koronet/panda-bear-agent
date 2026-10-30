@@ -847,9 +847,18 @@ def update_meeting(meeting_id: int, fields: dict, google=None) -> dict:
     return {"ok": True, "meeting": get_meeting(meeting_id)}
 
 
+EVENT_DESCRIPTION = (
+    "Hi there! 👋\n\n"
+    "This session is part of your onboarding at Koronet. It's a relaxed space to help you "
+    "get started, so feel free to bring any questions.\n\n"
+    "Can't make it? Just reply to this invite and we'll find another time.\n\n"
+    "See you soon! 🚀"
+)
+
+
 def _description(m: dict) -> str:
-    # Placeholder until Junior approves the generic English description.
-    return f"Sesión de {m['sessionLabel']} con {m['employeeName']}."
+    # Same friendly text for every session Junior creates (Product is Adrian's event: untouched).
+    return EVENT_DESCRIPTION
 
 
 def _add_to_instance(google, event_id: str, emails: list) -> tuple[list, str | None]:
