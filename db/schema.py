@@ -299,5 +299,58 @@ def migrate_db():
             UNIQUE(batchId, reminderDate)
         )
     """)
+    # Onboarding sessions per hire (HR, IT, Payroll, Product, First month), proposed
+    # by Panda Bear and created on Junior's calendar only when he clicks "Agendar"
+    # (an approval step). origin: created (by us) | existing (found on the
+    # calendar) | instance (hire added to one occurrence of a recurring event).
+    # A session belongs to a group: hires starting the same day share HR / IT / Payroll /
+    # Product (groupKey = start date); First month is per hire (groupKey = "fm:<batchId>").
+    # hires = JSON list of the hires in the session; invitedEmails = those already on the event.
+    cols = [r[1] for r in c.execute("PRAGMA table_info(onboarding_meetings)").fetchall()]
+    rebuild = bool(cols) and "groupKey" not in cols
+    if rebuild:
+        c.execute("ALTER TABLE onboarding_meetings RENAME TO onboarding_meetings_old")
+        conn.commit()
+    c.execute("""
+        CREATE TABLE IF NOT EXISTS onboarding_meetings (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            batchId INTEGER NOT NULL,
+            sessionType TEXT NOT NULL DEFAULT 'hr',
+            groupKey TEXT,
+            hires TEXT,
+            invitedEmails TEXT,
+            employeeName TEXT,
+            employeeLocation TEXT,
+            attendeeEmail TEXT,
+            emailSource TEXT,
+            extraAttendees TEXT,
+            title TEXT,
+            startDate TEXT,
+            startTime TEXT,
+            durationMinutes INTEGER DEFAULT 60,
+            status TEXT DEFAULT 'pending_approval',
+            eventId TEXT,
+            eventLink TEXT,
+            meetLink TEXT,
+            error TEXT,
+            createdAt TEXT NOT NULL,
+            updatedAt TEXT,
+            scheduledAt TEXT,
+            origin TEXT DEFAULT 'created',
+            organizerEmail TEXT,
+            UNIQUE(groupKey, sessionType)
+        )
+    """)
+    if rebuild:
+        new_cols = {r[1] for r in c.execute("PRAGMA table_info(onboarding_meetings)").fetchall()}
+        keep = [x for x in cols if x in new_cols and x != "sessionType"]
+        st = "o.sessionType" if "sessionType" in cols else "'hr'"
+        c.execute(f"""
+            INSERT INTO onboarding_meetings ({", ".join(keep)}, sessionType, groupKey)
+            SELECT {", ".join("o." + x for x in keep)}, {st},
+                   CASE WHEN {st} = 'first_month' THEN 'fm:' || o.batchId
+                        ELSE COALESCE((SELECT MIN(employeeHireDate) FROM messages WHERE batchId = o.batchId), o.startDate) END
+            FROM onboarding_meetings_old o""")
+        c.execute("DROP TABLE onboarding_meetings_old")
     conn.commit()
     conn.close()

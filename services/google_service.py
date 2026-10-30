@@ -20,10 +20,20 @@ SCOPES = [
     "https://www.googleapis.com/auth/gmail.settings.basic",
     "https://www.googleapis.com/auth/documents",
     "https://www.googleapis.com/auth/presentations",
+    # NEW HIRES- KORONET sheet: Jeisson writes each hire's corporate email there.
+    "https://www.googleapis.com/auth/spreadsheets.readonly",
 ]
+
+NEW_HIRES_SHEET_ID = os.getenv("NEW_HIRES_SHEET_ID", "1xxtiUZH9rw2_fBmeBzCF0fGbSTQOwmgrkKi-yqMkZ04")
 
 CREDENTIALS_PATH = os.getenv("GOOGLE_CREDENTIALS_PATH", "google_credentials.json")
 TOKEN_PATH = os.getenv("GOOGLE_TOKEN_PATH", "google_token.json")
+
+
+def _norm(s: str) -> str:
+    import unicodedata
+    s = unicodedata.normalize("NFKD", s or "").encode("ascii", "ignore").decode()
+    return " ".join(s.lower().split())
 
 
 class GoogleService(ServiceBase):
@@ -37,6 +47,7 @@ class GoogleService(ServiceBase):
         self._gmail = None
         self._docs = None
         self._slides = None
+        self._sheets = None
 
     def _on_start(self) -> None:
         from google.oauth2.credentials import Credentials
@@ -70,6 +81,7 @@ class GoogleService(ServiceBase):
         self._gmail = build("gmail", "v1", credentials=creds)
         self._docs = build("docs", "v1", credentials=creds)
         self._slides = build("slides", "v1", credentials=creds)
+        self._sheets = build("sheets", "v4", credentials=creds)
 
     def _on_stop(self) -> None:
         self._creds = None
@@ -77,6 +89,7 @@ class GoogleService(ServiceBase):
         self._gmail = None
         self._docs = None
         self._slides = None
+        self._sheets = None
 
     def _check_alive(self) -> bool:
         return self._creds is not None and self._calendar is not None
@@ -115,6 +128,162 @@ class GoogleService(ServiceBase):
                     if f"@{exclude_domain}" not in address.lower():
                         return address
         return None
+
+    def find_corporate_email(self, full_name: str, hire_date: str = "") -> dict:
+        """
+        Looks the hire up in the NEW HIRES- KORONET sheet (tab = hire year),
+        where Jeisson writes the corporate address, and returns
+        {"email", "source"} or {"email": None, "error"}. Matches on the
+        accent-insensitive "Name Surname"; with several matches the one whose
+        Start Date equals hire_date (YYYY-MM-DD) wins.
+        """
+        if not self._sheets:
+            return {"email": None, "error": "Google Sheets no está conectado"}
+        year = (hire_date or "")[:4] or str(__import__("datetime").date.today().year)
+        try:
+            rows = self._sheets.spreadsheets().values().get(
+                spreadsheetId=NEW_HIRES_SHEET_ID, range=f"'{year}'!A1:P300"
+            ).execute().get("values", [])
+        except Exception as e:
+            msg = str(e)
+            if "SERVICE_DISABLED" in msg or "has not been used in project" in msg:
+                msg = ("La Google Sheets API está desactivada en el proyecto de Google Cloud de "
+                       "Panda Bear. Actívala en console.cloud.google.com (APIs y servicios → "
+                       "Google Sheets API → Habilitar) y reintenta en unos minutos.")
+            elif "insufficient authentication scopes" in msg:
+                msg = ("Panda Bear no tiene permiso para leer el sheet NEW HIRES. "
+                       "Corre 'python setup_google_auth.py' una vez para autorizarlo.")
+            elif "403" in msg or "404" in msg:
+                msg = ("Tu cuenta no tiene acceso al sheet NEW HIRES- KORONET "
+                       f"({NEW_HIRES_SHEET_ID}). Pide acceso de lectura a quien lo administra.")
+            return {"email": None, "error": msg}
+
+        header_idx = next((i for i, r in enumerate(rows)
+                           if any("mail koronet" in (c or "").lower() for c in r)), None)
+        if header_idx is None:
+            return {"email": None, "error": f"No encontré la columna 'Mail Koronet' en la pestaña {year}"}
+        header = [(c or "").lower() for c in rows[header_idx]]
+
+        def col(*keys):
+            return next((i for i, h in enumerate(header) if any(k in h for k in keys)), None)
+
+        c_name, c_surname = col("name", "nombre"), col("surname", "apellido")
+        c_start, c_mail = col("start date", "fecha de ingreso"), col("mail koronet")
+        target = _norm(full_name)
+        want_date = ""
+        if hire_date:
+            y, m, d = hire_date.split("-")
+            want_date = f"{int(d)}/{int(m)}/{y}"
+
+        matches = []
+        for r in rows[header_idx + 1:]:
+            cell = lambda i: (r[i] if i is not None and i < len(r) else "") or ""
+            name = _norm(f"{cell(c_name)} {cell(c_surname)}")
+            if name and name == target and "@" in cell(c_mail):
+                parts = cell(c_start).strip().split("/")
+                start = "/".join(str(int(p)) if p.isdigit() else p for p in parts)
+                matches.append((start, cell(c_mail).strip()))
+        if not matches:
+            return {"email": None, "error": f"{full_name} no aparece todavía en NEW HIRES ({year}) con Mail Koronet"}
+        email = next((m for st, m in matches if want_date and st == want_date), matches[-1][1])
+        return {"email": email, "source": f"NEW HIRES- KORONET (pestaña {year})"}
+
+    def create_onboarding_event(self, event_id: str, title: str, start_iso: str, end_iso: str,
+                                time_zone: str, attendees: list, description: str = "") -> dict:
+        """
+        Inserts the onboarding session on Junior's primary calendar with a Meet
+        link and invites the attendees. event_id is fixed per meeting, so a
+        retry after a timeout finds the event already there instead of creating
+        a second one.
+        """
+        if not self._calendar:
+            return {"success": False, "error": "Google Calendar no está conectado"}
+        body = {
+            "id": event_id,
+            "summary": title,
+            "description": description,
+            "start": {"dateTime": start_iso, "timeZone": time_zone},
+            "end": {"dateTime": end_iso, "timeZone": time_zone},
+            "attendees": [{"email": a} for a in attendees],
+            "conferenceData": {"createRequest": {
+                "requestId": event_id, "conferenceSolutionKey": {"type": "hangoutsMeet"}}},
+        }
+        try:
+            ev = self._calendar.events().insert(
+                calendarId="primary", body=body, sendUpdates="all", conferenceDataVersion=1
+            ).execute()
+        except Exception as e:
+            if "409" not in str(e) and "already exists" not in str(e).lower():
+                return {"success": False, "error": str(e)}
+            ev = self._calendar.events().get(calendarId="primary", eventId=event_id).execute()
+            if ev.get("status") == "cancelled":
+                return {"success": False, "error": "El evento de este ingreso fue borrado del calendario"}
+        return {"success": True, "eventId": ev.get("id"), "link": ev.get("htmlLink"),
+                "meetLink": ev.get("hangoutLink")}
+
+    def busy_slots(self, emails: list, time_min: str, time_max: str, time_zone: str) -> dict:
+        """Free/busy per email ({email: [(start, end), ...]}), or {email: None} when Google can't tell."""
+        if not self._calendar or not emails:
+            return {e: None for e in emails}
+        try:
+            res = self._calendar.freebusy().query(body={
+                "timeMin": time_min, "timeMax": time_max, "timeZone": time_zone,
+                "items": [{"id": e} for e in emails]}).execute()
+        except Exception:
+            return {e: None for e in emails}
+        out = {}
+        for e in emails:
+            cal = res.get("calendars", {}).get(e, {})
+            out[e] = None if cal.get("errors") else [(b["start"], b["end"]) for b in cal.get("busy", [])]
+        return out
+
+    def list_events(self, time_min: str, time_max: str, query: str = None) -> list:
+        """Single (expanded) events on Junior's primary calendar in a window."""
+        if not self._calendar:
+            return []
+        kw = {"calendarId": "primary", "timeMin": time_min, "timeMax": time_max, "singleEvents": True,
+              "orderBy": "startTime", "maxResults": 250}
+        if query:
+            kw["q"] = query
+        try:
+            return self._calendar.events().list(**kw).execute().get("items", [])
+        except Exception:
+            return []
+
+    def get_event(self, event_id: str) -> dict | None:
+        if not self._calendar:
+            return None
+        try:
+            return self._calendar.events().get(calendarId="primary", eventId=event_id).execute()
+        except Exception:
+            return None
+
+    def set_attendee(self, event_id: str, email: str, present: bool) -> dict:
+        """Adds/removes one guest on one event (or one occurrence of a series) and notifies the guests."""
+        ev = self.get_event(event_id)
+        if not ev:
+            return {"success": False, "error": "No encontré ese evento en tu calendario"}
+        attendees = [a for a in ev.get("attendees", []) if a.get("email", "").lower() != email.lower()]
+        if present:
+            attendees.append({"email": email})
+        try:
+            ev = self._calendar.events().patch(
+                calendarId="primary", eventId=event_id, body={"attendees": attendees}, sendUpdates="all"
+            ).execute()
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+        return {"success": True, "eventId": ev.get("id"), "link": ev.get("htmlLink"), "meetLink": ev.get("hangoutLink")}
+
+    def move_event(self, event_id: str, start_iso: str, end_iso: str, time_zone: str) -> dict:
+        """Reschedules an event Junior organizes; guests get the update."""
+        try:
+            ev = self._calendar.events().patch(
+                calendarId="primary", eventId=event_id, sendUpdates="all",
+                body={"start": {"dateTime": start_iso, "timeZone": time_zone},
+                      "end": {"dateTime": end_iso, "timeZone": time_zone}}).execute()
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+        return {"success": True, "eventId": ev.get("id"), "link": ev.get("htmlLink"), "meetLink": ev.get("hangoutLink")}
 
     def get_signature(self) -> str:
         """
@@ -212,3 +381,7 @@ class GoogleService(ServiceBase):
     @property
     def slides(self):
         return self._slides
+
+    @property
+    def sheets(self):
+        return self._sheets

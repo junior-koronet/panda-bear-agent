@@ -180,12 +180,13 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
   <div class="logo">
     <div class="logo-title">Panda <span>Bear</span></div>
     <div class="logo-sub">People Ops Agent · Koronet</div>
-    <div class="logo-badge">v4.1 · APROBACIÓN POR MENSAJE</div>
+    <div class="logo-badge">v4.5 · HORARIOS LIBRES</div>
   </div>
   <div class="nav">
     <div class="nav-section">Oficina</div>
     <div class="nav-item active" onclick="nav('brief',this)"><span class="nav-icon">🌅</span> Morning Brief</div>
     <div class="nav-item" onclick="nav('approvals',this)"><span class="nav-icon">✅</span> Approvals</div>
+    <div class="nav-item" onclick="nav('scheduling',this)"><span class="nav-icon">📅</span> Agendamiento</div>
     <div class="nav-item" onclick="nav('conversation',this)"><span class="nav-icon">💬</span> Conversation</div>
     <div class="nav-section">Onboarding</div>
     <div class="nav-item" onclick="nav('messages',this)"><span class="nav-icon">📨</span> Messages</div>
@@ -252,18 +253,22 @@ function nav(page, el) {
   render(page);
 }
 
+function navTo(page) {
+  nav(page, document.querySelector(`.nav-item[onclick^="nav('${page}'"]`));
+}
+
 function render(page) {
   const el = document.getElementById('page-content');
   el.innerHTML = '<div class="loading"><span class="spinner"></span> Preguntando al agente...</div>';
   ({
-    brief: renderBrief, approvals: renderApprovals, conversation: renderConversation,
+    brief: renderBrief, approvals: renderApprovals, scheduling: renderScheduling, conversation: renderConversation,
     messages: renderMessages, hires: renderHires, runs: renderRuns,
     identity: renderIdentity, memory: renderMemory, decisions: renderDecisions, services: renderServices,
     ops: renderOpsCenter, incidents: renderIncidents, execution: renderExecution, audit: renderProdAudit,
   }[page] || renderBrief)();
 }
 
-const BADGES = {sent:'📤 Enviado por ti',approved:'⟳ Creando borrador…',pending:'⏳ Pending',pending_approval:'⏳ Pendiente de aprobación',failed:'✗ Falló — no se creó',skipped:'⏭ Omitido',rejected:'✗ Rechazado',running:'⟳ Running',completed:'✓ Done',draft_created:'📝 Borrador creado',ready_for_slack_draft:'⟳ Creando borrador en Slack…'};
+const BADGES = {sent:'📤 Enviado por ti',approved:'⟳ Creando borrador…',pending:'⏳ Pending',pending_approval:'⏳ Pendiente de aprobación',failed:'✗ Falló — no se creó',skipped:'⏭ Omitido',rejected:'✗ Rechazado',running:'⟳ Running',completed:'✓ Done',draft_created:'📝 Borrador creado',ready_for_slack_draft:'⟳ Creando borrador en Slack…',scheduled:'📅 Agendada',scheduling:'⟳ Agendando…'};
 const TYPE_LABEL = {employee_email:'📧 Correo Empleado',manager_slack:'💬 Slack Manager',bienvenidas_slack:'🎉 #Koronet'};
 function badge(s){return `<span class="badge ${s}">${BADGES[s]||s}</span>`}
 function esc(s){return(s||'').replace(/`/g,'\\`').replace(/\$/g,'\\$')}
@@ -294,7 +299,7 @@ async function renderBrief() {
         <button class="btn-primary" id="sync-btn" onclick="runSync(false)">▶ Run Sync</button>
         <button class="btn-secondary" id="dry-btn" onclick="runSync(true)">🔍 Dry Run</button>
       </div>
-      ${s.pendingApproval > 0 ? `<div style="margin-bottom:12px;font-size:13px;color:var(--purple);font-weight:600">⏳ Hay ${s.pendingApproval} batch(es) esperando tu aprobación →  <span style="cursor:pointer;text-decoration:underline" onclick="nav('approvals', document.querySelectorAll('.nav-item')[1])">Ver Approvals</span></div>` : ''}
+      ${s.pendingApproval > 0 ? `<div style="margin-bottom:12px;font-size:13px;color:var(--purple);font-weight:600">⏳ Hay ${s.pendingApproval} batch(es) esperando tu aprobación →  <span style="cursor:pointer;text-decoration:underline" onclick="navTo('approvals')">Ver Approvals</span></div>` : ''}
       ${brief.upcomingToday.length > 0 ? `
         <div class="section">
           <div class="section-header"><div class="section-title">Ingresan hoy</div></div>
@@ -303,7 +308,7 @@ async function renderBrief() {
           </tbody></table>
         </div>` : ''}
       <div class="section">
-        <div class="section-header"><div class="section-title">Mensajes Recientes</div><span class="section-sub" onclick="nav('messages',document.querySelectorAll('.nav-item')[3])">Ver todos →</span></div>
+        <div class="section-header"><div class="section-title">Mensajes Recientes</div><span class="section-sub" onclick="navTo('messages')">Ver todos →</span></div>
         ${brief.recentMessages && brief.recentMessages.length > 0
           ? renderMsgTable(brief.recentMessages.slice(0,5))
           : '<div class="empty"><div class="icon">📭</div>No hay mensajes. Corre un sync para comenzar.</div>'}
@@ -350,13 +355,25 @@ function msgTableRow(m) {
 async function renderApprovals() {
   const c = document.getElementById('page-content');
   try {
-    const hires = await api('/agent/batches');
+    const [hires, mtgs] = await Promise.all([api('/agent/batches'), api('/agent/meetings').catch(()=>[])]);
+    meetingsByBatch = {}; (mtgs||[]).forEach(m=>(m.hires||[]).forEach(x=>(meetingsByBatch[x.batchId] ||= []).push(m)));
     c.innerHTML = `
       <div class="page-header"><div class="page-title">Aprobaciones</div><div class="page-sub">Aprobar = crear el borrador. Nada se envía solo: tú revisas cada borrador y le das Enviar.</div></div>
       ${hires.length === 0
         ? '<div class="section"><div class="empty"><div class="icon">✅</div>No hay ingresos con mensajes pendientes.</div></div>'
         : hires.map(hireCard).join('')}`;
   } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${escapeHtml(e.message)}</div></div>`; }
+}
+
+let meetingsByBatch = {};
+function meetingLine(list) {
+  if (!list || !list.length) return '';
+  const mark = {scheduled:'✅', failed:'❌', skipped:'⏭', scheduling:'⟳'};
+  const chips = list.map(m=>`<span style="white-space:nowrap">${mark[m.status]||'⏳'} ${escapeHtml(m.sessionLabel)}${m.status==='scheduled'?' '+fmtShort(m.startDate):''}${(m.alerts||[]).some(a=>a.level==='warn')&&m.status!=='scheduled'?' ⚠️':''}</span>`).join(' · ');
+  const todo = list.filter(m=>m.status==='pending_approval'||m.status==='failed').length;
+  return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center">
+    <span style="font-size:13px"><b>📅 Sesiones${todo?` (${todo} por agendar)`:' — todas listas'}:</b> ${chips}</span>
+    <button class="act-btn" onclick="navTo('scheduling')">Ir a Agendamiento →</button></div>`;
 }
 
 const MSG_ORDER = {manager_slack:0, bienvenidas_slack:1, employee_email:2};
@@ -370,9 +387,12 @@ function hireCard(b) {
     <div class="approval-card">
       <div class="approval-card-title">${pending?'⏳':'✅'} ${escapeHtml(b.employeeName || 'Batch #'+b.id)} — ingresa el ${hire}</div>
       <div class="approval-card-sub">${pending} de ${msgs.length} mensaje(s) pendientes de aprobación.</div>
+      ${b.startAlert?`<div style="background:rgba(217,119,6,.1);border:1px solid var(--yellow);border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:13px">
+        ⚠️ <b>${escapeHtml((b.employeeName||'').split(' ')[0])} inicia el ${hire} y ese día ${escapeHtml(b.startAlert)}.</b> Si hace falta, negocia la fecha de ingreso con anticipación.</div>`:''}
       ${b.photoStatus==='missing'?`<div style="background:rgba(217,119,6,.1);border:1px solid var(--yellow);border-radius:10px;padding:10px 14px;margin-bottom:10px">
         ⚠️ Sin foto en BambooHR — el flyer no se generó. <input type="file" id="photo-input-${b.id}" accept="image/*"> <button class="act-btn" onclick="uploadBatchPhoto(${b.id})">📎 Subir foto</button></div>`:''}
       ${msgs.map(msgRow).join('')}
+      ${meetingLine(meetingsByBatch[b.id])}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
         ${pending?`<button class="act-btn approve" onclick="approveBatch(${b.id})">✅ Aprobar todos (${pending})</button>
         <button class="act-btn reject" onclick="rejectBatch(${b.id})">❌ Rechazar todos los pendientes</button>`:''}
@@ -441,6 +461,339 @@ async function retryMsg(id) {
     showDraftResults('Resultado del reintento', [r]);
   } catch(e) { showToast('❌ Error: '+escapeHtml(e.message), 8000); }
   render(currentPage);
+}
+
+// ── AGENDAMIENTO ─────────────────────────────────────────────────
+// Hires starting the same day share HR (Spanish with Junior / non-Spanish with Moira), IT
+// (Spanish only), Payroll (Colombians) and Product; First month is per hire.
+// Nothing reaches the calendar until Junior clicks Agendar / Agregar (an approval).
+const EXTRA_OPTIONS = [
+  {name: 'Guadalupe', email: 'guadalupe@kometsales.com'},
+  {name: 'Moira', email: 'moira.gago@koronet.com'},
+];
+const SESSION_ICON = {hr:'🚀', hr_en:'🚀', it:'💻', payroll:'📊', product:'🧩', first_month:'✨'};
+const HR_KINDS = ['hr','hr_en'];
+const SLOT_KINDS = ['first_month','it','payroll'];  // sessions with suggested free times
+let meetingsById = {};
+
+function fmtDate(d) {
+  return d ? new Date(d+'T12:00:00').toLocaleDateString('es-CO',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'}) : '—';
+}
+function fmtShort(d) {
+  return d ? new Date(d+'T12:00:00').toLocaleDateString('es-CO',{weekday:'short',day:'2-digit',month:'2-digit'}) : '—';
+}
+
+async function renderScheduling() {
+  const c = document.getElementById('page-content');
+  try {
+    const mtgs = await api('/agent/meetings');
+    meetingsById = Object.fromEntries(mtgs.map(m=>[m.id, m]));
+    mtgs.forEach(initExtras);
+    const days = [];
+    mtgs.forEach(m => {
+      let g = days.find(x=>x.date===m.hireDate); if (!g) days.push(g = {date:m.hireDate, people:{}, items:[]});
+      g.items.push(m); (m.hires||[]).forEach(h => g.people[h.batchId] = h);
+    });
+    c.innerHTML = `
+      <div class="page-header"><div class="page-title">Agendamiento</div><div class="page-sub">Las sesiones de onboarding de cada ingreso: HR, IT, Payroll (solo Colombia), Product Onboarding y First month. Panda Bear las propone teniendo en cuenta feriados, ausencias en BambooHR y calendarios ocupados. Nada se agenda hasta que tú le das <b>📅 Agendar</b>.</div></div>
+      ${days.length===0 ? '<div class="section"><div class="empty"><div class="icon">📅</div>No hay ingresos próximos para agendar.</div></div>'
+        : days.map(g => `<div class="section" style="margin-bottom:22px">
+            <div style="font-size:17px;font-weight:700;margin-bottom:4px">📅 Ingresan el ${fmtDate(g.date)}</div>
+            <div style="font-size:13px;color:var(--text2);margin-bottom:12px">${Object.values(g.people).map(h=>`👤 <b>${escapeHtml(h.name)}</b> · ${escapeHtml(h.location||'')} · ${h.language==='es'?'español':'no hispanohablante'}`).join(' &nbsp; ')}</div>
+            ${g.items.map(meetingCard).join('')}</div>`).join('')}`;
+    mtgs.filter(m=>SLOT_KINDS.includes(m.sessionType) && (m.status==='pending_approval'||m.status==='failed'))
+      .forEach(m=>loadSlots(m.id, m.sessionType==='first_month' ? null : m.startDate));
+  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${escapeHtml(e.message)}</div></div>`; }
+}
+
+function alertsHtml(m) {
+  const color = {warn:'var(--yellow)', ok:'var(--green)', info:'var(--text3)'};
+  const icon = {warn:'⚠️', ok:'✓', info:'ℹ️'};
+  return (m.alerts||[]).map(a=>`<div style="font-size:12px;color:${color[a.level]};margin-top:4px;font-weight:${a.level==='warn'?600:500}">${icon[a.level]} ${escapeHtml(a.text)}</div>`).join('');
+}
+
+function meetingCard(m) {
+  const editable = m.status==='pending_approval' || m.status==='failed';
+  const product = m.sessionType==='product';
+  const dis = editable ? '' : 'disabled';
+  const inp = 'background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-family:inherit;font-size:13px;color:var(--text)';
+  const lbl = 'display:block;font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin-bottom:4px';
+  let info = '';
+  if (m.status==='scheduled') info = `<div style="color:var(--green);font-size:13px;margin-top:10px">✅ ${product?`Agregados solo a la sesión del ${fmtShort(m.startDate)} ${m.startTime}: ${escapeHtml((m.invitedEmails||[]).join(', '))}`:`Agendada: ${fmtDate(m.startDate)} · ${m.startTime} (hora Colombia)${m.localTime?' = '+escapeHtml(m.localTime):''}`}.
+      ${m.eventLink?`<a href="${escapeHtml(m.eventLink)}" target="_blank">Ver evento</a>`:''}${m.meetLink?` · <a href="${escapeHtml(m.meetLink)}" target="_blank">Meet</a>`:''}</div>`;
+  else if (m.error) info = `<div style="color:var(--red);font-size:12px;margin-top:10px">❌ ${escapeHtml(m.error)}</div>`;
+
+  let body = '';
+  if (product) {
+    const opts = m.productOptions||[];
+    body = `<div style="margin-top:10px"><label style="${lbl}">Sesión de Adrian (se agrega solo a esa, no a la serie)</label>
+      <select id="mt-inst-${m.id}" style="${inp};min-width:280px" ${dis}>
+        ${opts.map(o=>`<option value="${o.eventId}" ${o.eventId===m.eventId?'selected':''}>${fmtDate(o.startDate)} · ${o.startTime} (hora Colombia)${o.attendees.length>3?` · ya van ${o.attendees.length-3} ingreso(s)`:''}</option>`).join('') || '<option value="">No encontré próximas sesiones</option>'}
+      </select>
+      <div style="font-size:12px;color:var(--text3);margin-top:6px">Invitación a: ${escapeHtml((m.hires||[]).map(h=>h.email||`(falta el correo de ${h.name})`).join(', '))}</div></div>`;
+  } else if (editable) {
+    body = `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:10px">
+      <div style="grid-column:1/-1"><label style="${lbl}">Título</label><input id="mt-title-${m.id}" style="${inp};width:100%" value="${escapeHtml(m.title||'')}"></div>
+      <div><label style="${lbl}">Fecha</label><input type="date" id="mt-date-${m.id}" style="${inp}" value="${m.startDate||''}"
+        ${SLOT_KINDS.includes(m.sessionType)?`onchange="loadSlots(${m.id}, this.value)"`:''}></div>
+      <div><label style="${lbl}">Hora (Colombia)</label><input type="time" id="mt-time-${m.id}" style="${inp}" value="${m.startTime||''}">
+        ${m.localTime?`<div style="font-size:11px;color:var(--text3);margin-top:4px">= ${escapeHtml(m.localTime)}</div>`:''}</div>
+      <div><label style="${lbl}">Duración (min)</label><input type="number" min="5" max="480" step="5" id="mt-dur-${m.id}" style="${inp};width:90px" value="${m.durationMinutes||60}"
+        ${SLOT_KINDS.includes(m.sessionType)?`onchange="loadSlots(${m.id}, document.getElementById('mt-date-${m.id}').value)"`:''}></div>
+      ${SLOT_KINDS.includes(m.sessionType)?`<div style="grid-column:1/-1"><label style="${lbl}">${m.sessionType==='first_month'?'Horarios libres (Guada y tú · lun–vie sin feriado · día 28–30)':'Horarios libres (responsable y tú · día hábil · después de HR)'} — cambia la fecha y se actualizan</label>
+        <div id="mt-slots-${m.id}" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--text3)">Buscando horarios…</div></div>`:''}
+      <div style="grid-column:1/-1"><label style="${lbl}">${(m.hires||[]).length>1?'Ingresos en esta sesión (correo corporativo)':'Correo corporativo del ingreso'}</label>
+        ${(m.hires||[]).map(h=>`<div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+          <span style="min-width:170px;font-size:13px;font-weight:600">${escapeHtml(h.name)}</span>
+          <input id="mt-email-${m.id}-${h.batchId}" style="${inp};flex:1;min-width:220px;max-width:360px" value="${escapeHtml(h.email||'')}" placeholder="Aún no está en NEW HIRES — escríbelo aquí">
+          <span style="font-size:11px;color:var(--text3)">${h.emailSource?escapeHtml(h.emailSource):'sin fuente'}</span></div>`).join('')}</div>
+      <div style="grid-column:1/-1"><label style="${lbl}">${HR_KINDS.includes(m.sessionType)?'Invitados adicionales':'Responsable (puedes cambiarlo)'}</label>
+        <div id="mt-extras-${m.id}">${extrasPicker(m.id, true)}</div></div>
+    </div>`;
+  } else {
+    body = `<div style="font-size:13px;color:var(--text2);margin-top:8px">${escapeHtml(m.title||'')} · ${m.durationMinutes} min · con ${escapeHtml([...(m.invitedEmails||[]), ...(m.extraAttendees||[])].join(', '))}</div>`;
+  }
+
+  const actions = editable ? `
+      ${product?'':`<button class="act-btn" onclick="saveMeeting(${m.id})">💾 Guardar cambios</button>`}
+      <button class="act-btn approve" onclick="scheduleMeeting(${m.id})">${product?'➕ Agregar a esta sesión (solo esta vez)':'📅 Agendar'}</button>
+      <button class="act-btn" onclick="skipMeeting(${m.id})">⏭ Omitir</button>`
+    : m.status!=='scheduled' ? ''
+    : (m.missingHires||[]).length ? `<button class="act-btn approve" onclick="addMissingHires(${m.id})">➕ Agregar a ${escapeHtml(m.missingHires.join(', '))} a esta sesión</button>`
+    : (m.organizerEmail && m.organizerEmail!=='junior@koronet.com' && !product)
+      ? `<span style="font-size:12px;color:var(--text3)">🔁 Para moverla, pídeselo a quien la organiza (${escapeHtml(m.organizerEmail)}).</span>`
+      : `<button class="act-btn" onclick="toggleReschedule(${m.id})">🔁 Reagendar</button>`;
+
+  return `<div class="approval-card" id="mtg-${m.id}" style="margin-bottom:12px">
+    <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap">
+      <div class="approval-card-title">${SESSION_ICON[m.sessionType]||'📅'} ${escapeHtml(m.sessionLabel||'Sesión')}${m.sessionType==='first_month'||(m.hires||[]).length>1?` — ${escapeHtml(m.employeeName)}`:''}</div>
+      ${badge(m.status)}
+    </div>
+    ${alertsHtml(m)}
+    ${body}
+    ${info}
+    <div id="mt-resched-${m.id}" style="display:none"></div>
+    ${actions?`<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px">${actions}</div>`:''}
+  </div>`;
+}
+
+// Free times for First month / IT / Payroll. `from` = the date being looked at (null = default
+// window); pre = 'mt' (pending card) or 'rs' (Reagendar panel). Re-runs whenever the date,
+// duration or responsible changes, so the suggestions always match what's on screen.
+const slotSeq = {};
+async function loadSlots(id, from, pre='mt') {
+  const box = document.getElementById(`${pre}-slots-${id}`);
+  if (!box) return;
+  const m = meetingsById[id];
+  const seq = slotSeq[pre+id] = (slotSeq[pre+id]||0) + 1;
+  const hosts = pre==='mt' && extrasState[id] ? extrasEmails(id) : (m.extraAttendees||[]);
+  const minutes = parseInt(document.getElementById(`${pre}-dur-${id}`)?.value, 10) || m.durationMinutes;
+  const q = new URLSearchParams({hosts: hosts.join(','), minutes});
+  if (from) q.set('from_date', from);
+  box.innerHTML = 'Buscando horarios…';
+  try {
+    const r = await api(`/agent/meetings/${id}/slots?${q}`);
+    if (seq !== slotSeq[pre+id]) return;  // a newer search already started
+    const slots = r.slots||[];
+    const fm = m.sessionType==='first_month';
+    const btns = slots.map(s=>`<button type="button" class="act-btn" onclick="pickSlot(${id},'${s.startDate}','${s.startTime}','${pre}')">
+        ${fmtShort(s.startDate)} ${s.startTime}${fm?` <span style="color:var(--text3)">· día ${s.day}</span>`:''}</button>`).join('');
+    const next = slots.length ? new Date(slots[slots.length-1].startDate+'T12:00:00') : null;
+    if (next) next.setDate(next.getDate()+1);
+    const more = next ? `<button type="button" class="act-btn" onclick="loadSlots(${id},'${next.toISOString().slice(0,10)}','${pre}')">Ver más días →</button>` : '';
+    box.innerHTML = `${r.notice?`<div style="width:100%;color:var(--yellow);font-weight:600">⚠️ ${escapeHtml(r.notice)}</div>`:''}
+      ${btns || '<span>No encontré espacios libres — elige otra fecha o escribe la hora a mano.</span>'}${more}`;
+  } catch(e) { if (seq === slotSeq[pre+id]) box.textContent = '⚠️ '+e.message; }
+}
+
+function pickSlot(id, d, t, pre='mt') {
+  document.getElementById(`${pre}-date-${id}`).value = d;
+  document.getElementById(`${pre}-time-${id}`).value = t;
+  showToast(`Horario elegido: ${fmtShort(d)} ${t}. Dale ${pre==='rs'?'Confirmar nuevo horario':'📅 Agendar'} para aplicarlo.`, 4000);
+}
+
+function meetingForm(id) {
+  if (meetingsById[id]?.sessionType==='product') return {eventId: document.getElementById(`mt-inst-${id}`).value};
+  const v = k => document.getElementById(`mt-${k}-${id}`).value;
+  const hireEmails = Object.fromEntries((meetingsById[id].hires||[]).map(h=>[String(h.batchId), document.getElementById(`mt-email-${id}-${h.batchId}`).value.trim()]));
+  return {title: v('title'), startDate: v('date'), startTime: v('time'), durationMinutes: parseInt(v('dur'),10),
+          hireEmails, extraAttendees: extrasEmails(id)};
+}
+
+// Invitee picker. HR: Ambas | Solo Guadalupe | Solo Moira | Otros. Other sessions: the
+// responsible person (Jeisson, Dani, Guada by default) as chips, changeable from the directory.
+let extrasState = {};
+const EXTRA_MODES = [
+  {key:'both', label:'Ambas', emails: EXTRA_OPTIONS.map(o=>o.email)},
+  {key:'guada', label:'Solo Guadalupe', emails: [EXTRA_OPTIONS[0].email]},
+  {key:'moira', label:'Solo Moira', emails: [EXTRA_OPTIONS[1].email]},
+  {key:'other', label:'Otros', emails: null},
+];
+
+function initExtras(m) {
+  const cur = m.extraAttendees || [];
+  const names = m.extraNames || {};
+  const same = (a,b) => a.length===b.length && a.every(e=>b.includes(e));
+  const hrLike = HR_KINDS.includes(m.sessionType);
+  const preset = hrLike && EXTRA_MODES.find(x => x.emails && same(cur, x.emails));
+  extrasState[m.id] = preset ? {mode: preset.key, others: [], segmented: true}
+    : {mode: 'other', segmented: hrLike, others: cur.map(e => ({name: names[e] || (EXTRA_OPTIONS.find(o=>o.email===e)||{}).name || '', email: e}))};
+}
+
+function extrasEmails(id) {
+  const st = extrasState[id];
+  const preset = EXTRA_MODES.find(x => x.key===st.mode);
+  return preset.emails ? [...preset.emails] : st.others.map(p=>p.email);
+}
+
+function extrasPicker(id, editable) {
+  const st = extrasState[id];
+  const seg = st.segmented ? EXTRA_MODES.map(x => {
+    const on = x.key===st.mode;
+    return `<button type="button" ${editable?'':'disabled'} onclick="setExtrasMode(${id},'${x.key}')"
+      style="border:1px solid ${on?'var(--teal)':'var(--border)'};background:${on?'var(--teal)':'var(--bg3)'};color:${on?'#fff':'var(--text2)'};
+      padding:6px 14px;font-size:12px;font-weight:600;font-family:inherit;cursor:${editable?'pointer':'default'};border-radius:7px">${x.label}</button>`;
+  }).join('') : '';
+  let body = '';
+  if (st.mode !== 'other') {
+    body = `<div style="font-size:12px;color:var(--text3);margin-top:6px">Se invita a: ${extrasEmails(id).join(', ')}</div>`;
+  } else {
+    const chips = st.others.map((p,i) => `<span style="display:inline-flex;gap:6px;align-items:center;background:var(--bg3);border:1px solid var(--border);border-radius:14px;padding:3px 10px;font-size:12px">
+      ${p.name?`<b>${escapeHtml(p.name)}</b> `:''}<span style="color:var(--text3)">${escapeHtml(p.email)}</span>
+      ${editable?`<span style="cursor:pointer;color:var(--red);font-weight:700" title="Quitar" onclick="removeOther(${id},${i})">×</span>`:''}</span>`).join('');
+    body = `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:${st.segmented?8:0}px">${chips || '<span style="font-size:12px;color:var(--text3)">Nadie seleccionado todavía.</span>'}</div>
+      ${editable?`<div style="position:relative;margin-top:8px;max-width:420px">
+        <input id="mt-search-${id}" autocomplete="off" placeholder="Busca por nombre en el directorio (o escribe un correo y Enter)"
+          oninput="searchPeople(${id}, this.value)" onblur="document.getElementById('mt-results-${id}').style.display='none'" onkeydown="if(event.key==='Enter'){event.preventDefault();addTypedEmail(${id}, this.value)}"
+          style="background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-family:inherit;font-size:13px;color:var(--text);width:100%">
+        <div id="mt-results-${id}" style="position:absolute;z-index:20;left:0;right:0;top:100%;background:var(--bg2);border:1px solid var(--border);border-radius:7px;box-shadow:0 6px 18px rgba(0,0,0,.12);display:none;max-height:260px;overflow:auto"></div>
+      </div>`:''}`;
+  }
+  return `${seg?`<div style="display:flex;gap:6px;flex-wrap:wrap">${seg}</div>`:''}${body}`;
+}
+
+function redrawExtras(id, focusSearch) {
+  document.getElementById(`mt-extras-${id}`).innerHTML = extrasPicker(id, true);
+  if (focusSearch) document.getElementById(`mt-search-${id}`)?.focus();
+  if (SLOT_KINDS.includes(meetingsById[id]?.sessionType)) loadSlots(id, document.getElementById(`mt-date-${id}`).value);  // new responsible → new free times
+}
+
+function setExtrasMode(id, mode) { extrasState[id].mode = mode; redrawExtras(id, mode==='other'); }
+
+function removeOther(id, i) { extrasState[id].others.splice(i,1); redrawExtras(id, true); }
+
+function addOther(id, name, email) {
+  const st = extrasState[id];
+  if (!st.others.some(p=>p.email.toLowerCase()===email.toLowerCase())) st.others.push({name, email});
+  redrawExtras(id, true);
+}
+
+function addTypedEmail(id, val) {
+  val = (val||'').trim();
+  if (/^[\w.+-]+@[\w-]+(\.[\w-]+)+$/.test(val)) addOther(id, '', val);
+  else if (val) showToast('Elige a alguien de la lista o escribe un correo completo', 4000);
+}
+
+let searchTimer = null;
+function searchPeople(id, q) {
+  clearTimeout(searchTimer);
+  const box = document.getElementById(`mt-results-${id}`);
+  if (q.trim().length < 2) { box.style.display='none'; return; }
+  searchTimer = setTimeout(async () => {
+    try {
+      const people = await api(`/agent/directory?q=${encodeURIComponent(q)}`);
+      window._dirHits = people;
+      box.innerHTML = people.length ? people.map((p,i) => `<div onmousedown="event.preventDefault();addOther(${id}, window._dirHits[${i}].name, window._dirHits[${i}].email)"
+          style="padding:8px 10px;cursor:pointer;border-bottom:1px solid var(--border)" onmouseover="this.style.background='var(--bg3)'" onmouseout="this.style.background=''">
+          <div style="font-size:13px;font-weight:600">${escapeHtml(p.name)}</div>
+          <div style="font-size:11px;color:var(--text3)">${escapeHtml(p.email)}${p.jobTitle?' · '+escapeHtml(p.jobTitle):''}</div></div>`).join('')
+        : '<div style="padding:8px 10px;font-size:12px;color:var(--text3)">Nadie con ese nombre en BambooHR.</div>';
+      box.style.display = 'block';
+    } catch(e) { box.innerHTML = `<div style="padding:8px 10px;font-size:12px;color:var(--red)">${escapeHtml(e.message)}</div>`; box.style.display='block'; }
+  }, 250);
+}
+
+async function saveMeeting(id) {
+  try { await api(`/agent/meetings/${id}`, {method:'POST', body: JSON.stringify(meetingForm(id))}); showToast('💾 Cambios guardados (no se agendó nada).'); renderScheduling(); }
+  catch(e) { showToast('❌ '+escapeHtml(e.message), 8000); }
+}
+
+async function scheduleMeeting(id) {
+  const m = meetingsById[id];
+  const f = meetingForm(id);
+  let question;
+  if (m.sessionType==='product') {
+    const o = (m.productOptions||[]).find(x=>x.eventId===f.eventId);
+    if (!o) { showToast('❌ Elige una fecha de Product Onboarding', 6000); return; }
+    const sinCorreo = (m.hires||[]).filter(h=>!h.email).map(h=>h.name);
+    if (sinCorreo.length) { showToast('❌ Falta el correo corporativo de '+escapeHtml(sinCorreo.join(', ')), 6000); return; }
+    question = `¿Agregar a ${m.employeeName} a "${m.title}" del ${fmtDate(o.startDate)} a las ${o.startTime} (hora Colombia)?\n\nSolo a esa sesión, no a la serie. Les llega la invitación a: ${(m.hires||[]).map(h=>h.email).join(', ')}.`;
+  } else {
+    const sinCorreo = (m.hires||[]).filter(h=>!f.hireEmails[String(h.batchId)]).map(h=>h.name);
+    if (sinCorreo.length) { showToast('❌ Falta el correo corporativo de '+escapeHtml(sinCorreo.join(', ')), 6000); return; }
+    const warns = (m.alerts||[]).filter(a=>a.level==='warn').map(a=>'⚠️ '+a.text).join('\n');
+    question = `¿Agendar "${f.title}" el ${fmtDate(f.startDate)} a las ${f.startTime} (hora Colombia) por ${f.durationMinutes} min?\n\nSe crea en tu calendario con Meet y se envía la invitación a:\n${[...Object.values(f.hireEmails), ...f.extraAttendees].join(', ')}${warns?`\n\nAlertas (de la propuesta guardada):\n${warns}`:''}`;
+  }
+  if (!confirm(question)) return;
+  try {
+    const r = await api(`/agent/meetings/${id}/schedule`, {method:'POST', body: JSON.stringify(f)});
+    if (r.ok) showToast(m.sessionType==='product' ? '➕ Agregada/o a esa sesión.' : '📅 Agendada — ya está en tu calendario.', 6000);
+    else showToast('❌ No se pudo agendar: '+escapeHtml(r.error||''), 10000);
+  } catch(e) { showToast('❌ '+escapeHtml(e.message), 8000); }
+  renderScheduling();
+}
+
+function toggleReschedule(id) {
+  const m = meetingsById[id];
+  const box = document.getElementById(`mt-resched-${id}`);
+  if (box.style.display==='block') { box.style.display='none'; return; }
+  const inp = 'background:var(--bg3);border:1px solid var(--border);border-radius:7px;padding:7px 9px;font-family:inherit;font-size:13px;color:var(--text)';
+  box.innerHTML = `<div style="background:var(--bg3);border:1px dashed var(--teal);border-radius:10px;padding:12px;margin-top:10px">
+    <div style="font-weight:700;font-size:13px;margin-bottom:8px">🔁 Mover la sesión — a todos les llega la actualización</div>
+    ${m.sessionType==='product'
+      ? `<select id="rs-inst-${id}" style="${inp};min-width:280px">${(m.productOptions||[]).map(o=>`<option value="${o.eventId}" ${o.eventId===m.eventId?'selected':''}>${fmtDate(o.startDate)} · ${o.startTime}</option>`).join('')}</select>`
+      : `<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+          <input type="date" id="rs-date-${id}" style="${inp}" value="${m.startDate}" ${SLOT_KINDS.includes(m.sessionType)?`onchange="loadSlots(${id}, this.value, 'rs')"`:''}>
+          <input type="time" id="rs-time-${id}" style="${inp}" value="${m.startTime}">
+          <input type="number" id="rs-dur-${id}" style="${inp};width:80px" min="5" max="480" step="5" value="${m.durationMinutes}"
+            ${SLOT_KINDS.includes(m.sessionType)?`onchange="loadSlots(${id}, document.getElementById('rs-date-${id}').value, 'rs')"`:''}> min</div>
+        ${SLOT_KINDS.includes(m.sessionType)?`<div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;margin:10px 0 4px">Horarios libres — cambia la fecha y se actualizan</div>
+          <div id="rs-slots-${id}" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12px;color:var(--text3)"></div>`:''}`}
+    <div style="margin-top:10px"><button class="act-btn approve" onclick="rescheduleMeeting(${id})">Confirmar nuevo horario</button>
+      <button class="act-btn" onclick="toggleReschedule(${id})">Cancelar</button></div></div>`;
+  box.style.display = 'block';
+  if (SLOT_KINDS.includes(m.sessionType)) loadSlots(id, m.startDate, 'rs');
+}
+
+async function rescheduleMeeting(id) {
+  const m = meetingsById[id];
+  const body = m.sessionType==='product' ? {eventId: document.getElementById(`rs-inst-${id}`).value}
+    : {startDate: document.getElementById(`rs-date-${id}`).value, startTime: document.getElementById(`rs-time-${id}`).value,
+       durationMinutes: parseInt(document.getElementById(`rs-dur-${id}`).value,10)};
+  const when = m.sessionType==='product' ? 'a la otra fecha elegida' : `al ${fmtDate(body.startDate)} a las ${body.startTime} (hora Colombia)`;
+  if (!confirm(`¿Mover "${m.title}" ${when}?\n\nA todos los invitados les llega la actualización.`)) return;
+  try {
+    const r = await api(`/agent/meetings/${id}/reschedule`, {method:'POST', body: JSON.stringify(body)});
+    if (r.ok) showToast('🔁 Reagendada.', 5000); else showToast('❌ No se pudo reagendar: '+escapeHtml(r.error||''), 10000);
+  } catch(e) { showToast('❌ '+escapeHtml(e.message), 8000); }
+  renderScheduling();
+}
+
+async function addMissingHires(id) {
+  const m = meetingsById[id];
+  if (!confirm(`¿Agregar a ${m.missingHires.join(', ')} a "${m.title}" del ${fmtDate(m.startDate)} ${m.startTime}?\n\nEs la misma sesión (no se crea otra). Les llega la invitación.`)) return;
+  try {
+    const r = await api(`/agent/meetings/${id}/add-hires`, {method:'POST'});
+    if (r.ok) showToast('➕ Agregados a la sesión.', 5000); else showToast('❌ '+escapeHtml(r.error||''), 10000);
+  } catch(e) { showToast('❌ '+escapeHtml(e.message), 8000); }
+  renderScheduling();
+}
+
+async function skipMeeting(id) {
+  if (!confirm('¿Omitir esta sesión para este ingreso? No se agendará nada.')) return;
+  try { await api(`/agent/meetings/${id}/skip`, {method:'POST'}); showToast('⏭ Omitida.'); }
+  catch(e) { showToast('❌ '+escapeHtml(e.message), 8000); }
+  renderScheduling();
 }
 
 // ── CONVERSATION ──────────────────────────────────────────────────
@@ -811,8 +1164,8 @@ async function renderOpsCenter() {
       </div>
       <div class="btn-row">
         <button class="btn-secondary" onclick="heartbeat()">💓 Send Heartbeat</button>
-        <button class="btn-secondary" onclick="nav('incidents',document.querySelectorAll('.nav-item')[14])">🚨 Ver Incidents</button>
-        <button class="btn-secondary" onclick="nav('audit',document.querySelectorAll('.nav-item')[16])">🎯 Production Audit</button>
+        <button class="btn-secondary" onclick="navTo('incidents')">🚨 Ver Incidents</button>
+        <button class="btn-secondary" onclick="navTo('audit')">🎯 Production Audit</button>
       </div>`;
   } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
 }

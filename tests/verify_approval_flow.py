@@ -12,11 +12,25 @@ Gmail ni Slack reales) y comprueba que:
      y se detienen al resolver todo
   7. aprobar un mensaje de Slack dispara el worker que crea el borrador real en Slack
      (Claude solo puede crear borradores), y si falla queda 'failed' con aviso a Junior
+  8. Agendamiento: la sesión se propone con la hora del correo y el correo corporativo
+     de NEW HIRES; se puede editar; "Agendar" crea UN evento (doble clic no duplica),
+     y un fallo queda 'failed' con el motivo y se reintenta con el mismo eventId
+  9. Sesiones IT / Payroll / Product / First month: días hábiles según feriados, alertas
+     (feriado, ausencia en BambooHR, ocupado), Product solo a UNA ocurrencia, First month
+     en día 28–30, sesiones ya existentes se vinculan (no se duplican), reagendar mueve
+     el evento y los cambios hechos en Calendar se sincronizan; alerta de feriado en Approvals
+ 11. Horarios libres de First month / IT / Payroll se recalculan desde la fecha que se mira:
+     ese día si hay espacio, si no el aviso de por qué y los siguientes días hábiles
+ 10. Varios ingresos el mismo día: una sola sesión de HR (español, contigo) + otra en inglés
+     con Moira si hay no hispanohablantes; IT solo hispanohablantes; Payroll solo Colombia;
+     todos a la misma Product; First month por persona; quien se suma después de agendar
+     se agrega al MISMO evento
 
 Uso:  python tests/verify_approval_flow.py      (o: pytest tests/verify_approval_flow.py)
 """
 
 import os
+import re
 import sys
 import tempfile
 from datetime import datetime, date, timedelta
@@ -47,9 +61,56 @@ class FakeGoogle:
         self.gmail = object()
         self.drafts = []
         self.fail_with = None
+        self.corporate = {"Milena Briones": "milena.briones@koronet.com"}
+        self.events = {}          # eventId → {title, start, end, tz, attendees, recurring?, organizer?}
+        self.event_fail_with = None
+        self.busy = {}            # email → [(start_iso, end_iso)]
 
     def start(self):
         pass
+
+    def find_corporate_email(self, name, hire_date=""):
+        email = self.corporate.get(name)
+        return {"email": email, "source": "NEW HIRES- KORONET (pestaña 2026)"} if email else             {"email": None, "error": f"{name} no aparece todavía en NEW HIRES"}
+
+    def create_onboarding_event(self, event_id, title, start_iso, end_iso, time_zone, attendees, description=""):
+        if self.event_fail_with:
+            return {"success": False, "error": self.event_fail_with}
+        if not re.fullmatch(r"[a-v0-9]{5,1024}", event_id):  # Google: "Invalid resource id value."
+            return {"success": False, "error": "Invalid resource id value."}
+        self.events.setdefault(event_id, {"title": title, "start": start_iso, "end": end_iso,
+                                          "tz": time_zone, "attendees": attendees})
+        return {"success": True, "eventId": event_id, "link": f"https://cal/{event_id}", "meetLink": "https://meet/x"}
+
+    def _as_event(self, eid, e):
+        off = lambda t: t if t[-6] in "+-" and t[-3] == ":" else t + "-05:00"
+        return {"id": eid, "summary": e["title"], "status": e.get("status", "confirmed"),
+                "start": {"dateTime": off(e["start"])}, "end": {"dateTime": off(e["end"])},
+                "attendees": [{"email": a} for a in e["attendees"]], "htmlLink": f"https://cal/{eid}",
+                "recurringEventId": e.get("recurring"), "organizer": {"email": e.get("organizer", "junior@koronet.com")}}
+
+    def list_events(self, time_min, time_max, query=None):
+        out = [self._as_event(k, v) for k, v in self.events.items()
+               if time_min[:10] <= v["start"][:10] <= time_max[:10] and (not query or query.lower() in v["title"].lower())]
+        return sorted(out, key=lambda e: e["start"]["dateTime"])
+
+    def get_event(self, eid):
+        v = self.events.get(eid)
+        return self._as_event(eid, v) if v else None
+
+    def busy_slots(self, emails, time_min, time_max, time_zone):
+        return {e: list(self.busy.get(e, [])) for e in emails}
+
+    def set_attendee(self, eid, email, present):
+        v = self.events.get(eid)
+        if not v:
+            return {"success": False, "error": "No encontré ese evento"}
+        v["attendees"] = [a for a in v["attendees"] if a != email] + ([email] if present else [])
+        return {"success": True, "eventId": eid, "link": f"https://cal/{eid}"}
+
+    def move_event(self, eid, start_iso, end_iso, time_zone):
+        self.events[eid].update(start=start_iso, end=end_iso)
+        return {"success": True, "eventId": eid, "link": f"https://cal/{eid}"}
 
     def find_personal_email(self, name):
         return None
@@ -366,6 +427,306 @@ def test_slack_draft_worker_creates_real_drafts_and_fails_loudly():
     assert agent.prepare_message_draft(mid)["status"] == "ready_for_slack_draft"
     w.create_pending_slack_drafts(notify=dms.append, runner=ok_runner)
     assert msgs(bid2)["manager_slack"]["status"] == "draft_created"
+
+
+def _fake_bamboo(time_off=()):
+    """Directory + who's-out for the session hosts (BambooHR is never called from tests)."""
+    from services import onboarding_meetings as om
+    people = [("1", "Jeisson", "Garcia", "jeisson@kometsales.com", "Colombia"),
+              ("2", "Daniel", "Patiño", "danielp@koronet.com", "Colombia"),
+              ("3", "Guadalupe", "Galle", "guadalupe@kometsales.com", "Argentina"),
+              ("4", "Moira", "Gago", "moira.gago@koronet.com", "Argentina"),
+              ("5", "Andrés", "Soporte", "andres.soporte@koronet.com", "Colombia")]
+
+    def fake(endpoint):
+        if endpoint.startswith("employees/directory"):
+            return {"employees": [{"id": i, "firstName": f, "lastName": l, "displayName": f"{f} {l}",
+                                   "workEmail": e, "location": loc, "jobTitle": ""} for i, f, l, e, loc in people]}
+        if endpoint.startswith("time_off/whos_out"):
+            return [{"type": "timeOff", "employeeId": i, "start": st, "end": en} for i, st, en in time_off]
+        return None
+    om._bamboo = fake
+    om._cache.clear()
+
+
+def _set_hire(bid, location, content="... sesión conmigo a las 08:00 am (hora Colombia)."):
+    conn = get_db()
+    conn.execute("UPDATE messages SET employeeLocation=?, messageContent=? WHERE batchId=? AND messageType='employee_email'",
+                 (location, content, bid))
+    conn.commit(); conn.close()
+
+
+def _created_events():
+    """Events Panda Bear created (the fixtures for Adrian's series / hand-made events carry an organizer)."""
+    return {k: v for k, v in google.events.items() if not v.get("organizer")}
+
+
+def _sessions(c, bid):
+    return {x["sessionType"]: x for x in c.get("/api/agent/meetings").json()
+            if bid in [h["batchId"] for h in x["hires"]]}
+
+
+def _session(c, bid, kind):
+    return _sessions(c, bid)[kind]
+
+
+def test_onboarding_meeting_proposal_edit_and_schedule():
+    _fake_bamboo()
+    google.events.clear()
+    google.event_fail_with = None
+    bid = make_hire(name="Milena Briones", hire_date="2099-11-03")
+    _set_hire(bid, "Argentina", "... una sesión conmigo a las 08:00 am (hora Colombia) / 10:00 am (hora Argentina).")
+
+    c = client()
+    m = _session(c, bid, "hr")
+    assert (m["startDate"], m["startTime"], m["status"]) == ("2099-11-03", "08:00", "pending_approval"), m
+    assert m["hires"][0]["email"] == "milena.briones@koronet.com" and "NEW HIRES" in m["hires"][0]["emailSource"], m
+    assert m["extraAttendees"] == ["guadalupe@kometsales.com", "moira.gago@koronet.com"], m
+    assert m["localTime"] == "10:00 (hora Argentina)", m
+    kinds = set(_sessions(c, bid))
+    assert kinds == {"hr", "it", "product", "first_month"}, kinds  # Argentina: no Payroll
+    assert not _created_events(), "nada se agenda antes de que Junior apruebe"
+
+    # Edit before approving; bad input is rejected with a readable error
+    assert c.post(f"/api/agent/meetings/{m['id']}", json={"startTime": "25:00"}).status_code == 400
+    r = c.post(f"/api/agent/meetings/{m['id']}", json={"startDate": "2099-11-04", "startTime": "09:30",
+                                                      "extraAttendees": ["guadalupe@kometsales.com"]})
+    assert r.status_code == 200 and r.json()["startTime"] == "09:30", r.text
+
+    # Forced failure → failed with reason, no event
+    google.event_fail_with = "Calendar caído"
+    r = c.post(f"/api/agent/meetings/{m['id']}/schedule").json()
+    assert not r["ok"] and r["meeting"]["status"] == "failed" and "Calendar caído" in r["meeting"]["error"], r
+    first_event_id = r["meeting"]["eventId"]
+
+    # Retry succeeds with the SAME event id; double click doesn't create a second event
+    google.event_fail_with = None
+    r = c.post(f"/api/agent/meetings/{m['id']}/schedule").json()
+    assert r["ok"] and r["meeting"]["status"] == "scheduled" and r["meeting"]["eventId"] == first_event_id, r
+    r2 = c.post(f"/api/agent/meetings/{m['id']}/schedule").json()
+    assert r2["ok"] and r2.get("note") == "Ya estaba agendado"
+    assert len(_created_events()) == 1, google.events
+    ev = google.events[first_event_id]
+    assert ev["start"] == "2099-11-04T09:30:00" and ev["end"] == "2099-11-04T10:30:00" and ev["tz"] == "America/Bogota", ev
+    assert ev["attendees"] == ["milena.briones@koronet.com", "guadalupe@kometsales.com"], ev
+    # Scheduled → no more edits
+    assert c.post(f"/api/agent/meetings/{m['id']}", json={"startTime": "10:00"}).status_code == 400
+
+    # A hire not yet in NEW HIRES: no email, can't be scheduled until Junior types it
+    bid2 = make_hire(name="Persona Sin Correo", hire_date="2099-11-10")
+    m2 = _session(c, bid2, "hr")
+    assert not m2["hires"][0]["email"] and "NEW HIRES" in (m2["error"] or ""), m2
+    r = c.post(f"/api/agent/meetings/{m2['id']}/schedule").json()
+    assert not r["ok"] and "correo corporativo" in r["error"], r
+    assert len(_created_events()) == 1
+
+    # A manual test card (negative batchId) with an id Google rejected gets a valid new id on retry
+    conn = get_db()
+    cur = conn.execute("INSERT INTO onboarding_meetings (batchId, sessionType, groupKey, employeeName, attendeeEmail, "
+                       "extraAttendees, title, startDate, startTime, durationMinutes, status, eventId, createdAt) VALUES "
+                       "(-7, 'hr', 'prueba', 'PRUEBA', 'prueba@example.com', '', 'PRUEBA', '2099-11-02', '08:00', 60, "
+                       "'failed', 'pbonb-7abc', '2099-01-01')")
+    conn.commit(); mid = cur.lastrowid; conn.close()
+    r = c.post(f"/api/agent/meetings/{mid}/schedule").json()
+    assert r["ok"] and re.fullmatch(r"[a-v0-9]{5,1024}", r["meeting"]["eventId"]), r
+    assert len(_created_events()) == 2
+
+
+def test_onboarding_sessions_holidays_alerts_product_first_month_reschedule():
+    import holidays as pyholidays
+    from skills import holidays_check as hol
+    google.events.clear()
+    google.busy.clear()
+    google.event_fail_with = None
+    # A Monday that is a holiday in Colombia (and not in Argentina) in 2099, followed by a business day.
+    co = pyholidays.country_holidays("CO", years=2099)
+    d = next(x for x in sorted(co) if x.weekday() == 0 and not hol.holiday_name(x, "Argentina")
+             and hol.is_business_day(x + timedelta(days=1), ["Colombia"]))
+    nxt = d + timedelta(days=1)
+    _fake_bamboo(time_off=[("1", (d - timedelta(days=3)).isoformat(), nxt.isoformat())])  # Jeisson out
+    google.busy["danielp@koronet.com"] = [(f"{nxt}T11:00:00-05:00", f"{nxt}T11:30:00-05:00")]
+    # Adrian's recurring Product Onboarding: two upcoming occurrences
+    p1, p2 = d + timedelta(days=8), d + timedelta(days=36)
+    for i, pd in enumerate((p1, p2)):
+        google.events[f"series1_{i}"] = {"title": "Monthly Product Onboarding", "start": f"{pd}T09:00:00",
+                                         "end": f"{pd}T10:00:00", "attendees": ["adrian.aubone@kometsales.com"],
+                                         "recurring": "series1", "organizer": "adrian.aubone@kometsales.com"}
+
+    google.corporate["Carlos Feriado"] = "carlos.feriado@koronet.com"
+    bid = make_hire(name="Carlos Feriado", hire_date=d.isoformat())
+    _set_hire(bid, "Colombia")
+    c = client()
+    rows = _sessions(c, bid)
+    assert set(rows) == {"hr", "it", "payroll", "product", "first_month"}, rows.keys()  # Colombia: Payroll too
+    alerts = lambda k: " | ".join(a["text"] for a in rows[k]["alerts"])
+
+    # HR on a Colombian holiday: warn, Moira gives it
+    assert "Feriado en Colombia" in alerts("hr") and "Moira" in alerts("hr"), alerts("hr")
+    # IT / Payroll: next Colombian business day at 10:00 / 11:00; Jeisson's leave and Dani's meeting flagged
+    assert (rows["it"]["startDate"], rows["it"]["startTime"], rows["it"]["durationMinutes"]) == (nxt.isoformat(), "10:00", 30)
+    assert (rows["payroll"]["startDate"], rows["payroll"]["startTime"]) == (nxt.isoformat(), "11:00")
+    assert rows["it"]["extraAttendees"] == ["jeisson@kometsales.com"] and "ausente" in alerts("it"), alerts("it")
+    assert rows["payroll"]["extraAttendees"] == ["danielp@koronet.com"] and "Ocupado a esa hora: Daniel" in alerts("payroll"), alerts("payroll")
+    # Product: nearest occurrence, options listed
+    assert rows["product"]["eventId"] == "series1_0" and rows["product"]["startDate"] == p1.isoformat(), rows["product"]
+    assert [o["eventId"] for o in rows["product"]["productOptions"]] == ["series1_0", "series1_1"]
+    # First month: Mon–Fri, no holiday, day 28–30
+    fm = rows["first_month"]
+    day = (date.fromisoformat(fm["startDate"]) - d).days
+    assert 28 <= day <= 30 and hol.is_business_day(fm["startDate"], ["Colombia", "Argentina"]), fm
+    assert fm["title"] == "Carlos / Guada - First month ✨" and fm["durationMinutes"] == 30, fm
+    slots = c.get(f"/api/agent/meetings/{fm['id']}/slots").json()["slots"]
+    assert slots and all(28 <= s["day"] <= 41 for s in slots), slots
+    assert not _created_events(), "nada se agenda solo"
+
+    # Approvals warns that the start date is a holiday in Colombia
+    b = next(x for x in c.get("/api/agent/batches").json() if x["id"] == bid)
+    assert b["startAlert"] and "feriado en Colombia" in b["startAlert"], b
+
+    # Jeisson is out: swap the IT host, schedule, then reschedule (event moved, not duplicated)
+    it = rows["it"]
+    r = c.post(f"/api/agent/meetings/{it['id']}/schedule", json={"extraAttendees": ["andres.soporte@koronet.com"]}).json()
+    assert r["ok"], r
+    ev_id = r["meeting"]["eventId"]
+    assert google.events[ev_id]["attendees"] == ["carlos.feriado@koronet.com", "andres.soporte@koronet.com"]
+    later = (nxt + timedelta(days=1)).isoformat()
+    r = c.post(f"/api/agent/meetings/{it['id']}/reschedule", json={"startDate": later, "startTime": "15:00"}).json()
+    assert r["ok"] and r["meeting"]["startDate"] == later and r["meeting"]["startTime"] == "15:00", r
+    assert google.events[ev_id]["start"] == f"{later}T15:00:00" and len(_created_events()) == 1
+    # Moved directly in Google Calendar → synced back
+    google.events[ev_id].update(start=f"{later}T16:00:00", end=f"{later}T16:30:00")
+    assert _session(c, bid, "it")["startTime"] == "16:00"
+
+    # Product: added to ONE occurrence only; reschedule moves the hire to the other one
+    pr = rows["product"]
+    r = c.post(f"/api/agent/meetings/{pr['id']}/schedule", json={"eventId": "series1_0"}).json()
+    assert r["ok"] and "carlos.feriado@koronet.com" in google.events["series1_0"]["attendees"], r
+    assert "carlos.feriado@koronet.com" not in google.events["series1_1"]["attendees"]
+    r = c.post(f"/api/agent/meetings/{pr['id']}/reschedule", json={"eventId": "series1_1"}).json()
+    assert r["ok"] and r["meeting"]["startDate"] == p2.isoformat(), r
+    assert "carlos.feriado@koronet.com" not in google.events["series1_0"]["attendees"]
+    assert "carlos.feriado@koronet.com" in google.events["series1_1"]["attendees"]
+    assert len(_created_events()) == 1, "Product no crea eventos nuevos"
+
+    # A session someone already booked by hand is linked, not proposed again
+    google.corporate["Ana Existente"] = "ana.existente@koronet.com"
+    google.events["moira_hr"] = {"title": "On - Boarding HR Koronet 🚀", "start": "2099-12-01T08:15:00",
+                                 "end": "2099-12-01T09:15:00", "organizer": "moira.gago@koronet.com",
+                                 "attendees": ["junior@koronet.com", "ana.existente@koronet.com", "moira.gago@koronet.com"]}
+    bid3 = make_hire(name="Ana Existente", hire_date="2099-12-01")
+    _set_hire(bid3, "Argentina")
+    hr = _session(c, bid3, "hr")
+    assert (hr["status"], hr["origin"], hr["eventId"], hr["startTime"]) == ("scheduled", "existing", "moira_hr", "08:15"), hr
+    assert hr["organizerEmail"] == "moira.gago@koronet.com" and hr["extraAttendees"] == ["moira.gago@koronet.com"], hr
+    assert c.post(f"/api/agent/meetings/{hr['id']}/schedule").json().get("note") == "Ya estaba agendado"
+    assert len(_created_events()) == 1
+
+
+def test_same_day_hires_share_sessions_by_language_and_country():
+    from skills import holidays_check as hol
+    _fake_bamboo()
+    google.events.clear()
+    google.busy.clear()
+    google.event_fail_with = None
+    day = date(2099, 3, 10)
+    while not hol.is_business_day(day, ["Colombia", "Argentina", "Romania", "Netherlands"]):
+        day += timedelta(days=1)
+    google.events["series2_0"] = {"title": "Monthly Product Onboarding", "start": f"{day + timedelta(days=7)}T09:00:00",
+                                  "end": f"{day + timedelta(days=7)}T10:00:00", "attendees": ["adrian.aubone@kometsales.com"],
+                                  "recurring": "series2", "organizer": "adrian.aubone@kometsales.com"}
+    people = [("Ana Colombia", "Colombia", "es"), ("Beto Argentina", "Argentina", "es"),
+              ("Cora Romania", "Romania", "en"), ("Dirk Holland", "Netherlands", "en")]
+    ids = {}
+    for name, loc, lang in people:
+        google.corporate[name] = name.split(" ")[0].lower() + "@koronet.com"
+        ids[name] = make_hire(name=name, hire_date=day.isoformat(), language=lang)
+        _set_hire(ids[name], loc, "... session with me at 08:30 am (hora Colombia).")
+    c = client()
+    rows = [x for x in c.get("/api/agent/meetings").json() if x["hireDate"] == day.isoformat()]
+    by = {}
+    for x in rows:
+        by.setdefault(x["sessionType"], []).append(sorted(h["name"] for h in x["hires"]))
+    assert by["hr"] == [["Ana Colombia", "Beto Argentina"]], by           # one HR in Spanish, with Junior
+    assert by["hr_en"] == [["Cora Romania", "Dirk Holland"]], by          # one HR in English, with Moira
+    assert by["it"] == [["Ana Colombia", "Beto Argentina"]], by           # IT: Spanish speakers only
+    assert by["payroll"] == [["Ana Colombia"]], by                        # Payroll: Colombia only
+    assert by["product"] == [sorted(n for n, _, _ in people)], by         # everyone, same Product
+    assert len(by["first_month"]) == 4 and all(len(x) == 1 for x in by["first_month"]), by  # one each
+    hr_en = next(x for x in rows if x["sessionType"] == "hr_en")
+    assert hr_en["extraAttendees"] == ["moira.gago@koronet.com"] and hr_en["startTime"] == "08:30", hr_en
+
+    # Schedule the Spanish HR once for both
+    hr = next(x for x in rows if x["sessionType"] == "hr")
+    r = c.post(f"/api/agent/meetings/{hr['id']}/schedule").json()
+    assert r["ok"], r
+    ev = google.events[r["meeting"]["eventId"]]
+    assert ev["attendees"][:2] == ["ana@koronet.com", "beto@koronet.com"] and len(_created_events()) == 1, ev
+
+    # Another Colombian starts the same day after HR was booked: joins pending IT/Payroll,
+    # and is offered to be added to the SAME HR event (no second event)
+    google.corporate["Eva Colombia"] = "eva@koronet.com"
+    eva = make_hire(name="Eva Colombia", hire_date=day.isoformat(), language="es")
+    _set_hire(eva, "Colombia")
+    s2 = _sessions(c, eva)
+    assert s2["hr"]["id"] == hr["id"] and s2["hr"]["missingHires"] == ["Eva Colombia"], s2["hr"]
+    assert sorted(h["name"] for h in s2["payroll"]["hires"]) == ["Ana Colombia", "Eva Colombia"], s2["payroll"]
+    assert len(s2["it"]["hires"]) == 3 and len(s2["product"]["hires"]) == 5
+    r = c.post(f"/api/agent/meetings/{hr['id']}/add-hires").json()
+    assert r["ok"] and not r["meeting"]["missingHires"], r
+    assert "eva@koronet.com" in ev["attendees"] and len(_created_events()) == 1, ev
+
+    # Product: the whole day goes to the same occurrence
+    pr = s2["product"]
+    r = c.post(f"/api/agent/meetings/{pr['id']}/schedule", json={"eventId": "series2_0"}).json()
+    assert r["ok"] and len(r["meeting"]["invitedEmails"]) == 5, r
+    assert set(google.events["series2_0"]["attendees"]) >= {"ana@koronet.com", "cora@koronet.com", "eva@koronet.com"}
+
+
+def test_slots_follow_the_date_being_looked_at():
+    from skills import holidays_check as hol
+    google.events.clear()
+    google.busy.clear()
+    day = date(2099, 5, 4)
+    while not hol.is_business_day(day, ["Colombia"]):
+        day += timedelta(days=1)
+    nxt = hol.next_business_day(day, ["Colombia"], include_today=False)
+    _fake_bamboo(time_off=[("1", nxt.isoformat(), nxt.isoformat())])  # Jeisson out the day after
+    google.corporate["Sara Slots"] = "sara.slots@koronet.com"
+    bid = make_hire(name="Sara Slots", hire_date=day.isoformat(), language="es")
+    _set_hire(bid, "Colombia", "... session with me at 08:00 am (hora Colombia).")
+    c = client()
+    rows = _sessions(c, bid)
+    url = lambda k: f"/api/agent/meetings/{rows[k]['id']}/slots"
+
+    # Payroll: Dani busy 11:00 on the HR day → that time isn't offered, others are; never before HR ends
+    google.busy["danielp@koronet.com"] = [(f"{day}T11:00:00-05:00", f"{day}T11:30:00-05:00")]
+    r = c.get(url("payroll"), params={"from_date": day.isoformat()}).json()
+    same = [x["startTime"] for x in r["slots"] if x["startDate"] == day.isoformat()]
+    assert same and "11:00" not in same and min(same) >= "09:00" and not r["notice"], r
+
+    # IT: the user looks at a Saturday → notice + next business days (skipping Jeisson's day off)
+    sat = day + timedelta(days=(5 - day.weekday()) % 7)
+    r = c.get(url("it"), params={"from_date": sat.isoformat()}).json()
+    assert "fin de semana" in r["notice"] and r["slots"] and all(x["startDate"] > sat.isoformat() for x in r["slots"]), r
+    assert all(hol.is_business_day(x["startDate"], ["Colombia"]) for x in r["slots"])
+    # Jeisson's day off → nothing that day; swapping the responsible (not saved) brings it back
+    r = c.get(url("it"), params={"from_date": nxt.isoformat()}).json()
+    assert "ausente" in r["notice"] and all(x["startDate"] != nxt.isoformat() for x in r["slots"]), r
+    r = c.get(url("it"), params={"from_date": nxt.isoformat(), "hosts": "andres.soporte@koronet.com"}).json()
+    assert "10:00" in [x["startTime"] for x in r["slots"] if x["startDate"] == nxt.isoformat()] and not r["notice"], r
+
+    # First month: a later date → slots start from there, "día N" relative to the start date
+    later = day + timedelta(days=45)
+    r = c.get(url("first_month"), params={"from_date": later.isoformat()}).json()
+    assert r["slots"] and all(x["startDate"] >= later.isoformat() for x in r["slots"]), r
+    assert all(x["day"] == (date.fromisoformat(x["startDate"]) - day).days for x in r["slots"])
+    # Everything busy that day → says so and moves on
+    google.busy["guadalupe@kometsales.com"] = [(f"{later}T00:00:00-05:00", f"{later}T23:59:00-05:00")]
+    r = c.get(url("first_month"), params={"from_date": later.isoformat()}).json()
+    if hol.is_business_day(later, ["Colombia", "Argentina"]):
+        assert "no hay un espacio libre" in r["notice"], r
+    assert r["slots"] and all(x["startDate"] > later.isoformat() for x in r["slots"]), r
+    assert not _created_events(), "buscar horarios nunca agenda"
 
 
 if __name__ == "__main__":

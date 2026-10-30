@@ -13,6 +13,7 @@ from pydantic import BaseModel
 from api.auth import verify_session_or_basic
 from db.schema import get_db
 from datetime import datetime
+from skills import holidays_check
 
 # Every route below requires a valid dashboard session (or Basic Auth for
 # scripts) — this is the entire attack surface for HR data, message
@@ -208,7 +209,9 @@ def get_batches():
             msgs = conn.execute(
                 "SELECT * FROM messages WHERE batchId=? ORDER BY id", (b["id"],)
             ).fetchall()
-            result.append({**dict(b), "messages": [dict(m) for m in msgs]})
+            first = dict(msgs[0]) if msgs else {}
+            alert = holidays_check.start_date_alert(b["hireDate"], first.get("employeeLocation"))
+            result.append({**dict(b), "messages": [dict(m) for m in msgs], "startAlert": alert})
         return result
     finally:
         conn.close()
@@ -263,6 +266,86 @@ def reject_batch(batch_id: int):
     except Exception as e:
         print(f"[routes] learn_from_batch failed for batch {batch_id}: {e}")
     return result
+
+
+# ── ONBOARDING SESSION SCHEDULING ("Agendamiento") ──────────────
+# Clicking "Agendar" is Junior's approval: only then is the event created on
+# his calendar (with Meet) and the invitations sent. See services/onboarding_meetings.py.
+
+from services import onboarding_meetings as meetings
+
+
+class MeetingEdit(BaseModel):
+    startDate: Optional[str] = None
+    startTime: Optional[str] = None
+    durationMinutes: Optional[int] = None
+    attendeeEmail: Optional[str] = None
+    extraAttendees: Optional[list[str]] = None
+    title: Optional[str] = None
+    eventId: Optional[str] = None  # Product Onboarding: which occurrence of Adrian's series
+    hireEmails: Optional[dict[str, str]] = None  # batchId → corporate email, for each hire of the session
+
+
+@router.get("/agent/meetings")
+def list_meetings():
+    return meetings.list_meetings(_agent._google)
+
+
+@router.get("/agent/directory")
+def search_directory(q: str = ""):
+    """Name → work email from the BambooHR directory, for the 'Otros' invitee picker."""
+    try:
+        return meetings.search_directory(q)
+    except RuntimeError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.post("/agent/meetings/{meeting_id}")
+def edit_meeting(meeting_id: int, body: MeetingEdit):
+    result = meetings.update_meeting(meeting_id, body.model_dump(exclude_none=True), _agent._google)
+    if not result["ok"]:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result["meeting"]
+
+
+@router.get("/agent/meetings/{meeting_id}/slots")
+def meeting_slots(meeting_id: int, from_date: str | None = None, hosts: str | None = None,
+                  minutes: int | None = None):
+    """First month / IT / Payroll: free slots for the hosts and Junior, from the date being looked at."""
+    host_list = [h.strip() for h in hosts.split(",")] if hosts is not None else None
+    return meetings.meeting_slots(meeting_id, _agent._google, from_date, host_list, minutes)
+
+
+@router.post("/agent/meetings/{meeting_id}/add-hires")
+def add_missing_hires(meeting_id: int):
+    """Adds hires who start the same day to a session that was already scheduled (same event, no duplicate)."""
+    return meetings.add_missing_hires(meeting_id, _agent._google)
+
+
+@router.post("/agent/meetings/{meeting_id}/reschedule")
+def reschedule_meeting(meeting_id: int, body: MeetingEdit):
+    """Moves a scheduled session; the guests get Google's update."""
+    return meetings.reschedule_meeting(meeting_id, body.model_dump(exclude_none=True), _agent._google)
+
+
+@router.post("/agent/meetings/{meeting_id}/schedule")
+def schedule_meeting(meeting_id: int, body: Optional[MeetingEdit] = None):
+    """Saves any last edits, then creates the event. A failure comes back in the body, never as a bare 500."""
+    if body:
+        edits = body.model_dump(exclude_none=True)
+        if edits:
+            saved = meetings.update_meeting(meeting_id, edits, _agent._google)
+            if not saved["ok"]:
+                raise HTTPException(status_code=400, detail=saved["error"])
+    return meetings.schedule_meeting(meeting_id, _agent._google)
+
+
+@router.post("/agent/meetings/{meeting_id}/skip")
+def skip_meeting(meeting_id: int):
+    result = meetings.skip_meeting(meeting_id)
+    if not result["ok"]:
+        raise HTTPException(status_code=409, detail=result["error"])
+    return result["meeting"]
 
 
 # ── INDIVIDUAL MESSAGE ACTIONS ───────────────────────────────────
