@@ -8,6 +8,8 @@ Reglas que ningún cambio futuro puede romper. Si un cambio las contradice, el c
   Junior revisa cada borrador y le da Enviar a mano.
 - Ningún código que se ejecute al aprobar puede llamar a `chat_postMessage`, `files_upload_v2`,
   `drafts().send`, `messages().send` ni `chat.scheduleMessage` para un mensaje de onboarding.
+- El sync (automático 3 veces al día o ▶ Run Sync) solo detecta ingresos y deja sus mensajes en
+  `pending_approval` (Mensajes programados). Nunca crea borradores ni envía.
 - `sent` lo marca **solo Junior** ("✓ Ya lo envié" en el dashboard) y solo desde
   `draft_created` o `ready_for_slack_draft`. El agente nunca pone `sent`.
 
@@ -30,6 +32,10 @@ Además, `skipped`, `rejected` y `sent` (este último solo lo marca Junior).
 - `batches.status` es solo un resumen de sus 3 mensajes (`_refresh_batch_status`).
 
 ## 3. Un fallo nunca queda en silencio
+
+- Las bandejas (Mensajes programados, Agendamientos) muestran solo lo pendiente de Junior. Lo aprobado
+  con éxito, rechazado u omitido pasa al Histórico de aprobaciones. **Un borrador o agendamiento fallido
+  se queda en su bandeja** con el motivo; nunca aparece en el Histórico como aprobado.
 
 - Si crear un borrador falla, el mensaje queda en `failed` con el motivo en `deliveryError`.
   Ese motivo se ve en el dashboard, en la respuesta de la API y en el DM a Junior.

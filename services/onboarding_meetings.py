@@ -993,3 +993,11 @@ def skip_meeting(meeting_id: int) -> dict:
     if not _set(meeting_id, "AND status IN ('pending_approval','failed')", status="skipped"):
         return {"ok": False, "error": "Solo se puede omitir un agendamiento pendiente o fallido"}
     return {"ok": True, "meeting": get_meeting(meeting_id)}
+
+
+def decided_meetings() -> list:
+    """
+    Sessions Junior already decided on — scheduled (incl. ones linked from his
+    calendar) or skipped — for the Histórico de aprobaciones. No Google calls.
+    """
+    return _load("WHERE status IN ('scheduled', 'skipped') ORDER BY COALESCE(scheduledAt, updatedAt, createdAt) DESC")

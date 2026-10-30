@@ -277,6 +277,10 @@ def migrate_db():
         "ALTER TABLE messages ADD COLUMN ccEmail TEXT",
         "ALTER TABLE messages ADD COLUMN slackTarget TEXT",
         "ALTER TABLE messages ADD COLUMN slackDraftAttempts INTEGER DEFAULT 0",
+        # Who started each sync: 'auto' (scheduled) | 'manual' (Run Sync button).
+        # NULL = run from before this column existed. error = why a run failed.
+        "ALTER TABLE runs ADD COLUMN trigger TEXT",
+        "ALTER TABLE runs ADD COLUMN error TEXT",
     ]
     for sql in migrations:
         try:
@@ -284,6 +288,20 @@ def migrate_db():
             conn.commit()
         except Exception:
             pass
+
+    # Approvals is the history of what was approved, and sorts/dates by
+    # approvedAt. Messages approved before that column was filled have it NULL:
+    # take the date from approval_memory (logged at approval time), else sentAt
+    # (set when the draft was created). Only fills NULLs — idempotent.
+    c.execute("""
+        UPDATE messages SET approvedAt = COALESCE(
+            (SELECT MAX(a.createdAt) FROM approval_memory a
+             WHERE a.messageId = messages.id AND a.action = 'approved'),
+            sentAt)
+        WHERE approvedAt IS NULL
+          AND status IN ('approved', 'draft_created', 'ready_for_slack_draft', 'failed', 'sent', 'delivered')
+    """)
+    conn.commit()
 
     # One row per (hire, Colombia calendar day) a pending-approval reminder
     # went out. The UNIQUE constraint is what guarantees "never more than one

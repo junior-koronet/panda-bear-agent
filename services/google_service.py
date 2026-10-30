@@ -11,6 +11,7 @@ Gmail account for HIM to send. Panda Bear never sends email itself.
 
 import os
 import re
+import threading
 from services.base import ServiceBase
 
 SCOPES = [
@@ -43,16 +44,49 @@ class GoogleService(ServiceBase):
     def __init__(self):
         super().__init__()
         self._creds = None
-        self._calendar = None
-        self._gmail = None
-        self._docs = None
-        self._slides = None
-        self._sheets = None
+        self._local = threading.local()
+
+    # googleapiclient clients sit on a single httplib2.Http, which is not
+    # thread-safe: the sync/reminder loops, FastAPI's threadpool and the
+    # agent's ThreadPoolExecutor hitting one shared client at once corrupted
+    # the SSL connection and crashed python.exe inside libcrypto-3.dll
+    # (0xc0000005, no traceback) — taking the dashboard down with it. Each
+    # thread therefore gets its own clients, built lazily from the shared creds.
+    def _client(self, api: str, version: str):
+        if self._creds is None:
+            return None
+        clients = getattr(self._local, "clients", None)
+        if clients is None or getattr(self._local, "creds", None) is not self._creds:
+            clients = self._local.clients = {}
+            self._local.creds = self._creds
+        if api not in clients:
+            from googleapiclient.discovery import build
+            clients[api] = build(api, version, credentials=self._creds, cache_discovery=False)
+        return clients[api]
+
+    @property
+    def _calendar(self):
+        return self._client("calendar", "v3")
+
+    @property
+    def _gmail(self):
+        return self._client("gmail", "v1")
+
+    @property
+    def _docs(self):
+        return self._client("docs", "v1")
+
+    @property
+    def _slides(self):
+        return self._client("slides", "v1")
+
+    @property
+    def _sheets(self):
+        return self._client("sheets", "v4")
 
     def _on_start(self) -> None:
         from google.oauth2.credentials import Credentials
         from google.auth.transport.requests import Request
-        from googleapiclient.discovery import build
 
         if not os.path.exists(TOKEN_PATH):
             raise RuntimeError(
@@ -77,19 +111,10 @@ class GoogleService(ServiceBase):
                 f.write(creds.to_json())
 
         self._creds = creds
-        self._calendar = build("calendar", "v3", credentials=creds)
-        self._gmail = build("gmail", "v1", credentials=creds)
-        self._docs = build("docs", "v1", credentials=creds)
-        self._slides = build("slides", "v1", credentials=creds)
-        self._sheets = build("sheets", "v4", credentials=creds)
+        self._calendar  # fail fast at startup if the client can't be built
 
     def _on_stop(self) -> None:
         self._creds = None
-        self._calendar = None
-        self._gmail = None
-        self._docs = None
-        self._slides = None
-        self._sheets = None
 
     def _check_alive(self) -> bool:
         return self._creds is not None and self._calendar is not None

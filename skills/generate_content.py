@@ -9,6 +9,9 @@ from datetime import datetime
 from groq import Groq
 from skills.base import Skill
 
+# Groq retired llama-3.3-70b-versatile; the model is configurable (.env GROQ_MODEL).
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+
 ONBOARDING_GUIDE_URL = "https://docs.google.com/document/d/1xa56Rg1uNwtPuy-eYHvqdfOKPAEKZ_fji8y0cRrQyc8/edit?tab=t.0"
 
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY")) if os.getenv("GROQ_API_KEY") else None
@@ -194,7 +197,7 @@ class RefineContentSkill(Skill):
         )
 
         response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=GROQ_MODEL,
             messages=[{"role": "user", "content": prompt}],
             max_tokens=500,
             temperature=0.6,

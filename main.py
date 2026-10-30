@@ -147,10 +147,29 @@ reminder_svc = ReminderService(
     notify_junior=agent.notify_junior,
 )
 
+def handle_sync_failed(slot_label: str, error: str) -> None:
+    """DM from the Panda Bear bot when a scheduled sync fails."""
+    if not JUNIOR_SLACK_ID:
+        print("[sync] JUNIOR_SLACK_ID no configurado — no puedo avisar del sync fallido")
+        return
+    dashboard = os.getenv("DASHBOARD_URL", "http://localhost:8000/")
+    text = (
+        f"🐼 ⚠️ *Falló el sync automático {slot_label}.*\n"
+        f"Error: `{error[:400]}`\n"
+        f"No se detectaron ingresos nuevos en este ciclo. Revisa Runs en el dashboard "
+        f"o dale ▶ Run Sync cuando esté resuelto: {dashboard}"
+    )
+    result = slack_svc.send_notification(JUNIOR_SLACK_ID, text)
+    if not result.get("sent"):
+        print(f"[sync] Slack rechazó el aviso de sync fallido: {result.get('error')}")
+
+
 sync_svc = SyncService(
     agent=agent,
-    check_interval_seconds=int(os.getenv("SYNC_INTERVAL_SECONDS", 21600)),
+    times=os.getenv("SYNC_TIMES", "08:00,12:00,16:00"),
+    timezone=os.getenv("SYNC_TIMEZONE", "America/Bogota"),
     lookback_days=int(os.getenv("SYNC_LOOKBACK_DAYS", 60)),
+    on_failure=handle_sync_failed,
 )
 
 # ── Register services with the Kernel ────────────────────────────

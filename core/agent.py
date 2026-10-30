@@ -28,6 +28,9 @@ from skills.meeting_notes_skill import CreateSummaryDocSkill, CreateSummarySlide
 
 from db.schema import get_db
 
+# Groq retired llama-3.3-70b-versatile; the model is configurable (.env GROQ_MODEL).
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY")) if os.getenv("GROQ_API_KEY") else None
 
 # Only this Slack user may trigger the personal-assistant skills (calendar/email).
@@ -329,7 +332,7 @@ class PandaBear:
         else:
             try:
                 response = groq_client.chat.completions.create(
-                    model="llama-3.3-70b-versatile",
+                    model=GROQ_MODEL,
                     messages=messages,
                     max_tokens=1500,
                     temperature=0.3,
@@ -418,7 +421,7 @@ class PandaBear:
             for attempt in range(2):
                 try:
                     response = groq_client.chat.completions.create(
-                        model="llama-3.3-70b-versatile",
+                        model=GROQ_MODEL,
                         messages=messages,
                         tools=PERSONAL_TOOLS,
                         tool_choice="auto",
@@ -884,7 +887,7 @@ class PandaBear:
 
     # ── SYNC (CORE LOOP) ─────────────────────────────────────────
 
-    def run_sync(self, dry_run: bool = False, lookback_days: int = 60) -> dict:
+    def run_sync(self, dry_run: bool = False, lookback_days: int = 60, trigger: str = "manual") -> dict:
         """
         The main detection and preparation cycle.
         G1: Detect new hires
@@ -894,6 +897,7 @@ class PandaBear:
         """
         conn = get_db()
         c = conn.cursor()
+        run_id = None
 
         try:
             # Migración silenciosa
@@ -904,8 +908,8 @@ class PandaBear:
                 pass
 
             c.execute(
-                "INSERT INTO runs (startedAt, status, dryRun) VALUES (?, 'running', ?)",
-                (datetime.now().isoformat(), 1 if dry_run else 0),
+                "INSERT INTO runs (startedAt, status, dryRun, trigger) VALUES (?, 'running', ?, ?)",
+                (datetime.now().isoformat(), 1 if dry_run else 0, trigger),
             )
             run_id = c.lastrowid
             conn.commit()
@@ -927,6 +931,10 @@ class PandaBear:
 
             scanned = detect_result.get("scanned", 0)
             new_employees = detect_result.get("result", [])
+            # _bamboo_report swallows API errors and returns [] — a sync that
+            # "saw" nobody didn't reach BambooHR; it must fail, not pass silently.
+            if not scanned:
+                raise RuntimeError("BambooHR no devolvió empleados (API caída, sin red o API key inválida)")
             messages_created = 0
             batch_id = None
 
@@ -1107,8 +1115,8 @@ class PandaBear:
             import traceback
             traceback.print_exc()
             c.execute(
-                "UPDATE runs SET status='failed', completedAt=? WHERE id=?",
-                (datetime.now().isoformat(), run_id),
+                "UPDATE runs SET status='failed', completedAt=?, error=? WHERE id=?",
+                (datetime.now().isoformat(), f"{type(e).__name__}: {e}"[:500], run_id),
             )
             conn.commit()
             raise e
@@ -1756,7 +1764,7 @@ class PandaBear:
             # generated content recently (decisions table).
             key = os.getenv("GROQ_API_KEY", "")
             if not key:
-                return {"connected": False, "model": "llama-3.3-70b-versatile", "error": "GROQ_API_KEY not set"}
+                return {"connected": False, "model": GROQ_MODEL, "error": "GROQ_API_KEY not set"}
             try:
                 c = get_db()
                 row = c.execute(
@@ -1765,16 +1773,16 @@ class PandaBear:
                 c.close()
                 return {
                     "connected": True,
-                    "model": "llama-3.3-70b-versatile",
+                    "model": GROQ_MODEL,
                     "lastDecisionId": row["id"] if row else None,
                     "error": None,
                 }
             except Exception as e:
-                return {"connected": bool(key), "model": "llama-3.3-70b-versatile", "error": str(e)[:200]}
+                return {"connected": bool(key), "model": GROQ_MODEL, "error": str(e)[:200]}
 
         bamboo = {"connected": False, "employeeCount": 0, "error": "timeout"}
         slack = {"connected": False, "scopes": {}, "workspace": None, "botName": None, "error": "timeout"}
-        groq_status = {"connected": False, "model": "llama-3.3-70b-versatile", "error": "timeout"}
+        groq_status = {"connected": False, "model": GROQ_MODEL, "error": "timeout"}
 
         pool = ThreadPoolExecutor(max_workers=3)
         try:

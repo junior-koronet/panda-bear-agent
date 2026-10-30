@@ -10,6 +10,9 @@ import os
 from groq import Groq
 from skills.base import Skill
 
+# Groq retired llama-3.3-70b-versatile; the model is configurable (.env GROQ_MODEL).
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+
 groq_client = Groq(api_key=os.getenv("GROQ_API_KEY")) if os.getenv("GROQ_API_KEY") else None
 
 
@@ -42,7 +45,7 @@ class SummarizeTranscriptSkill(Skill):
             f"Título de la reunión: {title}\n\nTranscripción:\n{transcript}"
         )
         response = groq_client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=GROQ_MODEL,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
             temperature=0.2,

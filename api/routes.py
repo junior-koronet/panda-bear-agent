@@ -15,6 +15,9 @@ from db.schema import get_db
 from datetime import datetime
 from skills import holidays_check
 
+# Groq retired llama-3.3-70b-versatile; the model is configurable (.env GROQ_MODEL).
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+
 # Every route below requires a valid dashboard session (or Basic Auth for
 # scripts) — this is the entire attack surface for HR data, message
 # sending, and the personal assistant. See api/auth.py for the login flow.
@@ -27,13 +30,7 @@ def set_agent(agent):
     _agent = agent
 
 
-# ── AGENT IDENTITY ──────────────────────────────────────────────
-
-@router.get("/agent/identity")
-def get_identity():
-    """Who is Panda Bear? Everything about the agent."""
-    return _agent.identify()
-
+# ── AGENT ───────────────────────────────────────────────────────
 
 @router.get("/agent/skills")
 def get_skills():
@@ -79,7 +76,7 @@ def get_integrations():
     try:
         groq = Groq(api_key=os.getenv("GROQ_API_KEY"))
         groq.chat.completions.create(
-            model="llama-3.3-70b-versatile",
+            model=GROQ_MODEL,
             messages=[{"role": "user", "content": "ping"}],
             max_tokens=5,
         )
@@ -104,19 +101,17 @@ class SyncRequest(BaseModel):
 @router.post("/agent/sync")
 def sync(body: SyncRequest):
     """Run the detection and preparation cycle. Nothing is sent — only queued for approval."""
-    return _agent.run_sync(dry_run=body.dryRun, lookback_days=body.lookbackDays)
+    return _agent.run_sync(dry_run=body.dryRun, lookback_days=body.lookbackDays, trigger="manual")
 
 
-# ── MESSAGES ────────────────────────────────────────────────────
-
-@router.get("/agent/messages")
-def get_messages():
-    conn = get_db()
-    try:
-        msgs = conn.execute("SELECT * FROM messages ORDER BY createdAt DESC").fetchall()
-        return [dict(m) for m in msgs]
-    finally:
-        conn.close()
+@router.get("/agent/sync/status")
+def sync_status():
+    """Schedule of the automatic sync, its next slot and the last successful sync (any trigger)."""
+    svc = _agent._kernel.get_service("sync_service")
+    if svc is None:
+        from services.sync_service import SyncService
+        return {"times": [], "timezone": None, "nextRun": None, "lastSuccess": SyncService.last_success()}
+    return svc.status()
 
 
 @router.get("/agent/runs")
@@ -215,6 +210,105 @@ def get_batches():
         return result
     finally:
         conn.close()
+
+
+# Inbox (Mensajes programados) = what still needs Junior: pending review, plus an
+# approved message whose draft is still being created or FAILED (it stays with
+# its reason so he can retry). History = what is done: draft created / sent by
+# Junior ("delivered" is the pre-v4 "sent"), rejected or skipped. A failure of
+# a hire who already started can't be fixed anymore: it goes to history as such.
+IN_FLIGHT_STATUSES = ("approved", "ready_for_slack_draft", "failed")
+DONE_STATUSES = ("draft_created", "sent", "delivered", "rejected", "skipped")
+
+
+@router.get("/agent/scheduled-messages")
+def scheduled_messages():
+    """
+    "Mensajes programados": each hire with messages that still need Junior —
+    pending review, or approved but whose draft is being created / failed (with
+    the reason, to retry). Once the draft exists (or the message is rejected /
+    skipped) it leaves this inbox for the Histórico de aprobaciones.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    inbox = "(m.status = 'pending_approval' OR (m.status IN ({}) AND m.employeeHireDate >= ?))".format(
+        ",".join("?" * len(IN_FLIGHT_STATUSES)))
+    conn = get_db()
+    try:
+        batches = conn.execute(
+            f"""
+            SELECT b.*, MIN(m.employeeHireDate) AS hireDate FROM batches b
+            JOIN messages m ON m.batchId = b.id
+            GROUP BY b.id
+            HAVING SUM({inbox}) > 0
+            ORDER BY MIN(m.employeeHireDate) ASC
+            """,
+            (*IN_FLIGHT_STATUSES, today),
+        ).fetchall()
+        result = []
+        for b in batches:
+            msgs = conn.execute(
+                f"SELECT * FROM messages m WHERE m.batchId=? AND {inbox} ORDER BY m.id",
+                (b["id"], *IN_FLIGHT_STATUSES, today),
+            ).fetchall()
+            first = dict(msgs[0]) if msgs else {}
+            alert = holidays_check.start_date_alert(b["hireDate"], first.get("employeeLocation"))
+            result.append({**dict(b), "messages": [dict(m) for m in msgs], "startAlert": alert})
+        return result
+    finally:
+        conn.close()
+
+
+@router.get("/agent/approvals/history")
+def approvals_history():
+    """
+    "Histórico de aprobaciones": per hire, everything already done — messages
+    whose draft was created (or Junior already sent), rejected or skipped, and
+    sessions scheduled or skipped. A failed draft is NOT here (it stays in its
+    inbox to retry) unless the hire already started. Nothing is approved here.
+    """
+    today = datetime.now().strftime("%Y-%m-%d")
+    conn = get_db()
+    try:
+        rows = conn.execute(
+            f"""
+            SELECT m.*, COALESCE(b.employeeName, m.employeeName) AS hireName,
+                   COALESCE(m.approvedAt,
+                            (SELECT MAX(a.createdAt) FROM approval_memory a
+                             WHERE a.messageId = m.id AND a.action IN ('rejected', 'skipped')),
+                            m.sentAt, m.createdAt) AS decidedAt
+            FROM messages m LEFT JOIN batches b ON b.id = m.batchId
+            WHERE m.status IN ({",".join("?" * len(DONE_STATUSES))})
+               OR (m.status IN ({",".join("?" * len(IN_FLIGHT_STATUSES))}) AND m.employeeHireDate < ?)
+            """,
+            (*DONE_STATUSES, *IN_FLIGHT_STATUSES, today),
+        ).fetchall()
+        hires: dict = {}
+
+        def hire(key, name, hire_date):
+            return hires.setdefault(key, {
+                "batchId": key if isinstance(key, int) else None, "employeeName": name,
+                "hireDate": hire_date, "lastDecidedAt": "", "messages": [], "meetings": [],
+            })
+
+        for r in rows:
+            r = dict(r)
+            r["decision"] = (r["status"] if r["status"] in ("rejected", "skipped")
+                             else "expired" if r["status"] in IN_FLIGHT_STATUSES else "approved")
+            h = hire(r["batchId"] if r["batchId"] is not None else f"m{r['id']}", r["hireName"], r["employeeHireDate"])
+            h["messages"].append(r)
+            h["lastDecidedAt"] = max(h["lastDecidedAt"], r["decidedAt"] or "")
+    finally:
+        conn.close()
+
+    # A session shared by several hires of the same day shows under each of them.
+    for m in meetings.decided_meetings():
+        m["decidedAt"] = m.get("scheduledAt") or m.get("updatedAt") or m.get("createdAt") or ""
+        for hr in m["hires"] or [{"batchId": m["batchId"], "name": m["employeeName"], "hireDate": m["startDate"]}]:
+            h = hire(hr.get("batchId"), hr.get("name"), hr.get("hireDate"))
+            h["meetings"].append(m)
+            h["lastDecidedAt"] = max(h["lastDecidedAt"], m["decidedAt"])
+
+    return sorted(hires.values(), key=lambda h: h["lastDecidedAt"], reverse=True)
 
 
 @router.get("/agent/batches/{batch_id}")
@@ -626,22 +720,7 @@ def meeting_status():
     return _agent.meeting_status()
 
 
-# ── MEMORY & LEARNING ────────────────────────────────────────────
-
-@router.get("/agent/memory")
-def get_memory():
-    return _agent._memory.get_memory_summary()
-
-
-@router.get("/agent/decisions")
-def get_decisions():
-    return _agent._memory.get_recent_decisions(limit=50)
-
-
-@router.get("/agent/lessons")
-def get_lessons():
-    return _agent._memory.get_lessons_for_context()
-
+# ── LEARNING ─────────────────────────────────────────────────────
 
 @router.post("/agent/learn/{batch_id}")
 def learn(batch_id: int):
@@ -651,37 +730,6 @@ def learn(batch_id: int):
 @router.get("/agent/employee-timeline/{employee_name}")
 def employee_timeline(employee_name: str):
     return _agent._memory.get_employee_timeline(employee_name)
-
-
-# ── KERNEL & SERVICES ────────────────────────────────────────────
-
-@router.get("/agent/kernel/health")
-def kernel_health():
-    return _agent._kernel.health()
-
-
-@router.get("/agent/kernel/metrics")
-def kernel_metrics():
-    return _agent._kernel.metrics()
-
-
-@router.post("/agent/kernel/heartbeat")
-def kernel_heartbeat():
-    return _agent._kernel.heartbeat()
-
-
-# ── OPERATIONS CENTER ────────────────────────────────────────────
-
-@router.get("/agent/ops-center")
-def ops_center():
-    """Full system state in one call. Green/yellow/red at a glance."""
-    return _agent.ops_center()
-
-
-@router.get("/agent/production-audit")
-def production_audit():
-    """Scored production readiness across 8 dimensions. No indulgence."""
-    return _agent.production_audit()
 
 
 # ── INCIDENTS ────────────────────────────────────────────────────

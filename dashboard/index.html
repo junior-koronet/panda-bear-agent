@@ -24,6 +24,10 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
 .nav-section{padding:8px 20px 4px;font-size:10px;color:#444;text-transform:uppercase;letter-spacing:.1em;font-weight:600}
 .nav-item{display:flex;align-items:center;gap:10px;padding:9px 20px;cursor:pointer;color:#888;font-size:13.5px;font-weight:500;transition:all .15s;border-left:2px solid transparent}
 .nav-item:hover{color:#fff;background:var(--sidebar2)}
+.nav-count{margin-left:auto;background:var(--purple,#7c3aed);color:#fff;border-radius:10px;font-size:11px;font-weight:700;padding:1px 7px}
+.nav-item.nav-quiet{font-size:12.5px;padding:7px 20px;color:#666}
+.sync-status{padding:10px 20px;font-size:11.5px;color:#888;border-top:1px solid var(--sidebar-border);line-height:1.5}
+.sync-status b{color:#ccc;font-weight:600}
 .nav-item.active{color:var(--teal);border-left-color:var(--teal);background:rgba(0,184,173,.08)}
 .nav-icon{font-size:15px;width:18px;text-align:center}
 .sidebar-footer{padding:14px 20px;border-top:1px solid var(--sidebar-border);font-size:11px;color:#555;line-height:1.6}
@@ -180,29 +184,22 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
   <div class="logo">
     <div class="logo-title">Panda <span>Bear</span></div>
     <div class="logo-sub">People Ops Agent · Koronet</div>
-    <div class="logo-badge">v4.5 · HORARIOS LIBRES</div>
+    <div class="logo-badge">v4.7 · MENÚ DEPURADO</div>
   </div>
   <div class="nav">
-    <div class="nav-section">Oficina</div>
-    <div class="nav-item active" onclick="nav('brief',this)"><span class="nav-icon">🌅</span> Morning Brief</div>
-    <div class="nav-item" onclick="nav('approvals',this)"><span class="nav-icon">✅</span> Approvals</div>
-    <div class="nav-item" onclick="nav('scheduling',this)"><span class="nav-icon">📅</span> Agendamiento</div>
-    <div class="nav-item" onclick="nav('conversation',this)"><span class="nav-icon">💬</span> Conversation</div>
     <div class="nav-section">Onboarding</div>
-    <div class="nav-item" onclick="nav('messages',this)"><span class="nav-icon">📨</span> Messages</div>
-    <div class="nav-item" onclick="nav('hires',this)"><span class="nav-icon">👤</span> Upcoming Hires</div>
-    <div class="nav-item" onclick="nav('runs',this)"><span class="nav-icon">⚡</span> Runs</div>
-    <div class="nav-section">Agent</div>
-    <div class="nav-item" onclick="nav('identity',this)"><span class="nav-icon">🐼</span> Identity</div>
-    <div class="nav-item" onclick="nav('memory',this)"><span class="nav-icon">🧠</span> Memory</div>
-    <div class="nav-item" onclick="nav('decisions',this)"><span class="nav-icon">📋</span> Decisions</div>
-    <div class="nav-item" onclick="nav('services',this)"><span class="nav-icon">⚙️</span> Services</div>
+    <div class="nav-item active" onclick="nav('hires',this)"><span class="nav-icon">👤</span> Próximos ingresos</div>
+    <div class="nav-item" onclick="nav('scheduled',this)"><span class="nav-icon">📨</span> Mensajes programados <span class="nav-count" id="nav-pending-count" style="display:none"></span></div>
+    <div class="nav-item" onclick="nav('approvals',this)"><span class="nav-icon">✅</span> Histórico de aprobaciones</div>
+    <div class="nav-item" onclick="nav('scheduling',this)"><span class="nav-icon">📅</span> Agendamientos</div>
+    <div class="nav-section">Panda Bear</div>
+    <div class="nav-item" onclick="nav('conversation',this)"><span class="nav-icon">💬</span> Chats internos</div>
+    <div class="nav-item" onclick="nav('brief',this)"><span class="nav-icon">🌅</span> Morning Brief</div>
     <div class="nav-section">Sistema</div>
-    <div class="nav-item" onclick="nav('ops',this)"><span class="nav-icon">📡</span> Ops Center</div>
-    <div class="nav-item" onclick="nav('incidents',this)"><span class="nav-icon">🚨</span> Incidents</div>
-    <div class="nav-item" onclick="nav('execution',this)"><span class="nav-icon">📦</span> Ejecución</div>
-    <div class="nav-item" onclick="nav('audit',this)"><span class="nav-icon">🎯</span> Prod Audit</div>
+    <div class="nav-item nav-quiet" onclick="nav('runs',this)"><span class="nav-icon">⚡</span> Historial de ejecuciones</div>
+    <div class="nav-item nav-quiet" onclick="nav('incidents',this)"><span class="nav-icon">🚨</span> Incidents</div>
   </div>
+  <div class="sync-status" id="sync-status" title="Sync automático: detecta ingresos y los deja en Mensajes programados. Nunca envía ni crea borradores.">🔄 Último sync: …</div>
   <div class="sidebar-footer">
     <div style="font-weight:600;color:#ccc;margin-bottom:2px">Junior Osorio</div>
     <div>People Operations · Koronet</div>
@@ -224,7 +221,7 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
 
 <script>
 const BASE = window.location.origin;
-let currentPage = 'brief';
+let currentPage = 'hires';
 let chatMode = 'hr';
 let toastTimer = null;
 
@@ -258,17 +255,20 @@ function navTo(page) {
 }
 
 function render(page) {
-  const el = document.getElementById('page-content');
+  // Swap in a fresh container: a slower page still loading (e.g. the Brief)
+  // keeps a reference to the old, detached node, so when it finishes it can't
+  // overwrite the section Junior opened afterwards.
+  const old = document.getElementById('page-content');
+  const el = old.cloneNode(false);
+  old.replaceWith(el);
   el.innerHTML = '<div class="loading"><span class="spinner"></span> Preguntando al agente...</div>';
   ({
-    brief: renderBrief, approvals: renderApprovals, scheduling: renderScheduling, conversation: renderConversation,
-    messages: renderMessages, hires: renderHires, runs: renderRuns,
-    identity: renderIdentity, memory: renderMemory, decisions: renderDecisions, services: renderServices,
-    ops: renderOpsCenter, incidents: renderIncidents, execution: renderExecution, audit: renderProdAudit,
-  }[page] || renderBrief)();
+    hires: renderHires, scheduled: renderScheduled, approvals: renderApprovals, scheduling: renderScheduling,
+    conversation: renderConversation, brief: renderBrief, runs: renderRuns, incidents: renderIncidents,
+  }[page] || renderHires)();
 }
 
-const BADGES = {sent:'📤 Enviado por ti',approved:'⟳ Creando borrador…',pending:'⏳ Pending',pending_approval:'⏳ Pendiente de aprobación',failed:'✗ Falló — no se creó',skipped:'⏭ Omitido',rejected:'✗ Rechazado',running:'⟳ Running',completed:'✓ Done',draft_created:'📝 Borrador creado',ready_for_slack_draft:'⟳ Creando borrador en Slack…',scheduled:'📅 Agendada',scheduling:'⟳ Agendando…'};
+const BADGES = {sent:'📤 Enviado por ti',approved:'⟳ Creando borrador…',pending:'⏳ Pending',pending_approval:'⏳ Pendiente de aprobación',failed:'✗ Falló — no se creó',delivered:'📤 Enviado (versión anterior)',skipped:'⏭ Omitido',rejected:'✗ Rechazado',running:'⟳ Running',completed:'✓ Done',draft_created:'📝 Borrador creado',ready_for_slack_draft:'⟳ Creando borrador en Slack…',scheduled:'📅 Agendada',scheduling:'⟳ Agendando…'};
 const TYPE_LABEL = {employee_email:'📧 Correo Empleado',manager_slack:'💬 Slack Manager',bienvenidas_slack:'🎉 #Koronet'};
 function badge(s){return `<span class="badge ${s}">${BADGES[s]||s}</span>`}
 function esc(s){return(s||'').replace(/`/g,'\\`').replace(/\$/g,'\\$')}
@@ -295,11 +295,8 @@ async function renderBrief() {
         <div class="stat-card"><div class="stat-label">Sent</div><div class="stat-value">${s.totalSent}</div></div>
         <div class="stat-card"><div class="stat-label">Failed</div><div class="stat-value" style="color:${s.totalFailed>0?'var(--red)':'var(--text)'}">${s.totalFailed}</div></div>
       </div>
-      <div class="btn-row">
-        <button class="btn-primary" id="sync-btn" onclick="runSync(false)">▶ Run Sync</button>
-        <button class="btn-secondary" id="dry-btn" onclick="runSync(true)">🔍 Dry Run</button>
-      </div>
-      ${s.pendingApproval > 0 ? `<div style="margin-bottom:12px;font-size:13px;color:var(--purple);font-weight:600">⏳ Hay ${s.pendingApproval} batch(es) esperando tu aprobación →  <span style="cursor:pointer;text-decoration:underline" onclick="navTo('approvals')">Ver Approvals</span></div>` : ''}
+      <div style="margin-bottom:12px;font-size:13px;color:var(--text2)">▶ El sync manual está en <span style="cursor:pointer;text-decoration:underline" onclick="navTo('hires')">Próximos ingresos</span>.</div>
+      ${s.pendingApproval > 0 ? `<div style="margin-bottom:12px;font-size:13px;color:var(--purple);font-weight:600">⏳ Hay ${s.pendingApproval} ingreso(s) con mensajes esperando tu revisión →  <span style="cursor:pointer;text-decoration:underline" onclick="navTo('scheduled')">Ver Mensajes programados</span></div>` : ''}
       ${brief.upcomingToday.length > 0 ? `
         <div class="section">
           <div class="section-header"><div class="section-title">Ingresan hoy</div></div>
@@ -308,7 +305,7 @@ async function renderBrief() {
           </tbody></table>
         </div>` : ''}
       <div class="section">
-        <div class="section-header"><div class="section-title">Mensajes Recientes</div><span class="section-sub" onclick="navTo('messages')">Ver todos →</span></div>
+        <div class="section-header"><div class="section-title">Mensajes Recientes</div><span class="section-sub" onclick="navTo('approvals')">Ver historial →</span></div>
         ${brief.recentMessages && brief.recentMessages.length > 0
           ? renderMsgTable(brief.recentMessages.slice(0,5))
           : '<div class="empty"><div class="icon">📭</div>No hay mensajes. Corre un sync para comenzar.</div>'}
@@ -351,29 +348,149 @@ function msgTableRow(m) {
     </td></tr>`;
 }
 
-// ── APPROVALS ────────────────────────────────────────────────────
-async function renderApprovals() {
+// ── MENSAJES PROGRAMADOS ─────────────────────────────────────────
+// Messages the agent prepared that wait for Junior's review. Approving one
+// creates its draft (never sends) and moves it to the Histórico de aprobaciones.
+async function renderScheduled() {
   const c = document.getElementById('page-content');
   try {
-    const [hires, mtgs] = await Promise.all([api('/agent/batches'), api('/agent/meetings').catch(()=>[])]);
-    meetingsByBatch = {}; (mtgs||[]).forEach(m=>(m.hires||[]).forEach(x=>(meetingsByBatch[x.batchId] ||= []).push(m)));
+    const hires = await api('/agent/scheduled-messages');
+    setPendingCount(hires.reduce((n,b)=>n+(b.messages||[]).length, 0));
     c.innerHTML = `
-      <div class="page-header"><div class="page-title">Aprobaciones</div><div class="page-sub">Aprobar = crear el borrador. Nada se envía solo: tú revisas cada borrador y le das Enviar.</div></div>
+      <div class="page-header"><div class="page-title">Mensajes programados</div><div class="page-sub">Mensajes que preparó Panda Bear y esperan tu revisión. Aprobar = crear el borrador (nunca se envía). Lo que apruebas, rechazas u omites sale de aquí y pasa al <span style="cursor:pointer;text-decoration:underline" onclick="navTo('approvals')">Histórico de aprobaciones →</span></div></div>
       ${hires.length === 0
-        ? '<div class="section"><div class="empty"><div class="icon">✅</div>No hay ingresos con mensajes pendientes.</div></div>'
+        ? '<div class="section"><div class="empty"><div class="icon">📭</div>No hay mensajes pendientes de revisión.<br><small>El sync automático revisa BambooHR 3 veces al día y deja aquí los nuevos ingresos.</small></div></div>'
         : hires.map(hireCard).join('')}`;
   } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${escapeHtml(e.message)}</div></div>`; }
 }
 
-let meetingsByBatch = {};
-function meetingLine(list) {
-  if (!list || !list.length) return '';
-  const mark = {scheduled:'✅', failed:'❌', skipped:'⏭', scheduling:'⟳'};
-  const chips = list.map(m=>`<span style="white-space:nowrap">${mark[m.status]||'⏳'} ${escapeHtml(m.sessionLabel)}${m.status==='scheduled'?' '+fmtShort(m.startDate):''}${(m.alerts||[]).some(a=>a.level==='warn')&&m.status!=='scheduled'?' ⚠️':''}</span>`).join(' · ');
-  const todo = list.filter(m=>m.status==='pending_approval'||m.status==='failed').length;
-  return `<div style="background:var(--bg3);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:10px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:center">
-    <span style="font-size:13px"><b>📅 Sesiones${todo?` (${todo} por agendar)`:' — todas listas'}:</b> ${chips}</span>
-    <button class="act-btn" onclick="navTo('scheduling')">Ir a Agendamiento →</button></div>`;
+// ── HISTÓRICO DE APROBACIONES ──────────────────────────────────────
+// Per hire, everything already decided: messages approved (and how the draft
+// ended up), rejected or skipped, and sessions scheduled or skipped. Nothing is
+// approved here; a failed draft can be retried and a session rescheduled.
+const DRAFT_STATE = {
+  draft_created: m => `<span style="color:var(--green)">📝 Borrador creado${m.messageType==='employee_email'?(m.employeeEmail?' en Gmail para '+escapeHtml(m.employeeEmail):' en Gmail'):' en Slack'}</span>`,
+  ready_for_slack_draft: m => `<span style="color:var(--yellow)">⟳ Creando borrador en Slack…${m.deliveryError?' Último intento: '+escapeHtml(m.deliveryError):''}</span>`,
+  approved: m => `<span style="color:var(--yellow)">⟳ Creando borrador…</span>`,
+  failed: m => `<span style="color:var(--red)">✗ Falló${m.deliveryError?' — '+escapeHtml(m.deliveryError):''} · el ingreso ya pasó</span>`,
+  sent: m => `<span style="color:var(--text2)">📤 Borrador creado y enviado por ti</span>`,
+  delivered: m => `<span style="color:var(--text2)">📤 Enviado (versión anterior del agente)</span>`,
+  rejected: m => `<span style="color:var(--text3)">No se creó borrador</span>`,
+  skipped: m => `<span style="color:var(--text3)">No se creó borrador</span>`,
+};
+const DECISION = {
+  approved: '<span style="color:var(--green);font-weight:600">✅ Aprobado</span>',
+  rejected: '<span style="color:var(--red);font-weight:600">❌ Rechazado</span>',
+  skipped: '<span style="color:var(--text2);font-weight:600">⏭ Omitido</span>',
+  expired: '<span style="color:var(--red);font-weight:600">⚠️ Aprobado, sin borrador</span>',
+  scheduled: '<span style="color:var(--green);font-weight:600">✅ Agendada</span>',
+  skipped_session: '<span style="color:var(--text2);font-weight:600">⏭ Omitida</span>',
+  linked: '<span style="color:var(--green);font-weight:600">🔗 Ya existía</span>',
+};
+function fmtDateTime(d) {
+  return d ? new Date(d).toLocaleString('es-CO',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
+}
+function decidedCell(decision, at) {
+  return `${DECISION[decision]||escapeHtml(decision)}<div style="font-size:11.5px;font-family:'JetBrains Mono',monospace;color:var(--text3);margin-top:2px">${fmtDateTime(at)}</div>`;
+}
+
+function historyMsgRow(m) {
+  return `<tr>
+    <td style="font-weight:600;font-size:13px">${TYPE_LABEL[m.messageType]||m.messageType}${m.messageType==='manager_slack'&&m.managerName?`<div style="font-size:11px;color:var(--text3);font-weight:400">${escapeHtml(m.managerName)}</div>`:''}</td>
+    <td>${decidedCell(m.decision, m.decidedAt)}</td>
+    <td style="font-size:12.5px">${(DRAFT_STATE[m.status]||(()=>badge(m.status)))(m)}</td>
+    <td style="white-space:nowrap;text-align:right">
+      <button class="act-btn" onclick="viewMsg(${m.id},\`${esc(m.messageContent)}\`,'${escapeHtml(m.employeeName)}','${m.status}')">👁</button>
+      ${m.status==='draft_created'?`<button class="act-btn" onclick="markSent(${m.id})">✓ Ya lo envié</button>`:''}
+    </td></tr>`;
+}
+
+function historyMeetingRow(m) {
+  const linked = m.status==='scheduled' && m.origin==='existing';
+  const when = `${fmtDate(m.startDate)} · ${m.startTime} (hora Colombia)${m.localTime?' = '+escapeHtml(m.localTime):''}`;
+  const result = m.status==='skipped' ? '<span style="color:var(--text3)">No se agendó</span>'
+    : `<span style="color:var(--green)">📅 ${when}</span>${linked&&m.organizerEmail?`<div style="font-size:11.5px;color:var(--text3)">La organiza ${escapeHtml(m.organizerEmail)}</div>`:''}
+       ${m.eventLink?`<div style="font-size:12px"><a href="${escapeHtml(m.eventLink)}" target="_blank">Ver evento</a>${m.meetLink?` · <a href="${escapeHtml(m.meetLink)}" target="_blank">Meet</a>`:''}</div>`:''}`;
+  const canMove = m.status==='scheduled' && !linked && m.startDate >= new Date().toISOString().slice(0,10);
+  return `<tr>
+    <td style="font-weight:600;font-size:13px">${SESSION_ICON[m.sessionType]||'📅'} ${escapeHtml(m.sessionLabel||m.title||'Sesión')}${(m.hires||[]).length>1?`<div style="font-size:11px;color:var(--text3);font-weight:400">compartida con ${escapeHtml(m.hires.map(h=>h.name).join(', '))}</div>`:''}</td>
+    <td>${decidedCell(linked?'linked':m.status==='skipped'?'skipped_session':m.status, m.decidedAt)}</td>
+    <td style="font-size:12.5px">${result}</td>
+    <td style="white-space:nowrap;text-align:right">${canMove?`<button class="act-btn" onclick="openReschedule(${m.id})">🔁 Reagendar</button>`:''}</td></tr>`;
+}
+
+let histData = [];
+const histFilter = {q: '', type: 'all', decision: 'all'};
+
+async function renderApprovals() {
+  const c = document.getElementById('page-content');
+  try {
+    histData = await api('/agent/approvals/history');
+    const sel = 'background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-family:inherit;font-size:13px;color:var(--text)';
+    c.innerHTML = `
+      <div class="page-header"><div class="page-title">Histórico de aprobaciones</div><div class="page-sub">Todo lo que ya resolviste, en una ficha por persona: mensajes con su borrador creado, sesiones agendadas, y lo rechazado u omitido. Lo más reciente arriba. Lo pendiente o fallido sigue en <span style="cursor:pointer;text-decoration:underline" onclick="navTo('scheduled')">Mensajes programados</span> y <span style="cursor:pointer;text-decoration:underline" onclick="navTo('scheduling')">Agendamientos</span>.</div></div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+        <input id="hist-q" placeholder="🔎 Buscar por nombre…" style="${sel};flex:1;min-width:220px" value="${escapeHtml(histFilter.q)}" oninput="histFilter.q=this.value;drawHistory()">
+        <select id="hist-type" style="${sel}" onchange="histFilter.type=this.value;drawHistory()">
+          <option value="all">Mensajes y sesiones</option><option value="msg">Solo mensajes</option><option value="mtg">Solo sesiones</option></select>
+        <select id="hist-decision" style="${sel}" onchange="histFilter.decision=this.value;drawHistory()">
+          <option value="all">Todos los estados</option><option value="ok">Aprobados / agendados</option><option value="rejected">Rechazados</option><option value="skipped">Omitidos</option></select>
+      </div>
+      <div id="hist-list"></div>`;
+    document.getElementById('hist-type').value = histFilter.type;
+    document.getElementById('hist-decision').value = histFilter.decision;
+    drawHistory();
+  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${escapeHtml(e.message)}</div></div>`; }
+}
+
+function drawHistory() {
+  const box = document.getElementById('hist-list');
+  if (!box) return;
+  const q = histFilter.q.trim().toLowerCase();
+  const okDecision = d => histFilter.decision==='all'
+    || (histFilter.decision==='ok' ? ['approved','scheduled','expired'].includes(d) : d===histFilter.decision);
+  const byDateDesc = (x,y) => (y.decidedAt||'').localeCompare(x.decidedAt||'');
+  const cards = histData.filter(h => !q || (h.employeeName||'').toLowerCase().includes(q)).map(h => {
+    const msgs = histFilter.type==='mtg' ? [] : h.messages.filter(m=>okDecision(m.decision)).sort(byDateDesc);
+    const mtgs = histFilter.type==='msg' ? [] : h.meetings.filter(m=>okDecision(m.status)).sort(byDateDesc);
+    return {h, msgs, mtgs};
+  }).filter(x => x.msgs.length || x.mtgs.length);
+  const head = t => `<thead><tr><th style="width:26%">${t}</th><th style="width:18%">Decisión</th><th>Resultado</th><th></th></tr></thead>`;
+  box.innerHTML = cards.length === 0
+    ? `<div class="section"><div class="empty"><div class="icon">✅</div>${histData.length?'Nada coincide con el filtro.':'Todavía no hay nada en el histórico.'}</div></div>`
+    : cards.map(({h, msgs, mtgs}) => `<div class="section">
+        <div class="section-header"><div class="section-title">👤 ${escapeHtml(h.employeeName||'Ingreso #'+h.batchId)} <span style="color:var(--text3);font-weight:400">· ingreso ${fmtShort(h.hireDate)}</span></div></div>
+        ${msgs.length?`<table class="table">${head('💬 Mensajes')}<tbody>${msgs.map(historyMsgRow).join('')}</tbody></table>`:''}
+        ${mtgs.length?`<table class="table">${head('📅 Sesiones')}<tbody>${mtgs.map(historyMeetingRow).join('')}</tbody></table>`:''}
+      </div>`).join('');
+}
+
+// "🔁 Reagendar" from the history: opens that (already scheduled) session in
+// Agendamientos with its reschedule panel open.
+let schedFocus = null;
+function openReschedule(id) {
+  schedFocus = id;
+  navTo('scheduling');
+}
+
+function setPendingCount(n) {
+  const el = document.getElementById('nav-pending-count');
+  if (!el) return;
+  el.textContent = n; el.style.display = n > 0 ? '' : 'none';
+}
+
+// Last successful sync (auto or manual), shown under the menu on every page.
+async function refreshSyncStatus() {
+  try {
+    const [st, pend] = await Promise.all([api('/agent/sync/status'), api('/agent/scheduled-messages')]);
+    setPendingCount(pend.reduce((n,b)=>n+(b.messages||[]).length, 0));
+    const next = st.nextRun ? new Date(st.nextRun).toLocaleString('es-CO',{weekday:'short',hour:'2-digit',minute:'2-digit'}) : '—';
+    document.getElementById('sync-status').innerHTML =
+      `🔄 Último sync exitoso:<br><b>${st.lastSuccess?fmtDateTime(st.lastSuccess):'nunca'}</b><br>` +
+      `<span style="color:#666">Automático: ${(st.times||[]).join(' · ')} (CO)<br>Próximo: ${next}</span>`;
+  } catch(e) {
+    document.getElementById('sync-status').innerHTML = `🔄 Último sync: <span style="color:var(--red)">sin conexión</span>`;
+  }
 }
 
 const MSG_ORDER = {manager_slack:0, bienvenidas_slack:1, employee_email:2};
@@ -382,17 +499,19 @@ const MSG_TITLE = {manager_slack:'💬 Mensaje al líder (borrador en Slack DM)'
 function hireCard(b) {
   const msgs = (b.messages||[]).slice().sort((x,y)=>(MSG_ORDER[x.messageType]??9)-(MSG_ORDER[y.messageType]??9));
   const pending = msgs.filter(m=>m.status==='pending_approval').length;
+  const failed = msgs.filter(m=>m.status==='failed').length;
+  const working = msgs.length - pending - failed;
+  const total = b.messageCount || msgs.length;
   const hire = b.hireDate ? new Date(b.hireDate+'T12:00:00').toLocaleDateString('es-CO',{weekday:'long',day:'2-digit',month:'2-digit',year:'numeric'}) : '—';
   return `
     <div class="approval-card">
-      <div class="approval-card-title">${pending?'⏳':'✅'} ${escapeHtml(b.employeeName || 'Batch #'+b.id)} — ingresa el ${hire}</div>
-      <div class="approval-card-sub">${pending} de ${msgs.length} mensaje(s) pendientes de aprobación.</div>
+      <div class="approval-card-title">${failed?'⚠️':pending?'⏳':'⟳'} ${escapeHtml(b.employeeName || 'Batch #'+b.id)} — ingresa el ${hire}</div>
+      <div class="approval-card-sub">${[pending?`${pending} por revisar`:'', failed?`<span style="color:var(--red);font-weight:600">${failed} fallido(s) — revisa el motivo y reintenta</span>`:'', working?`${working} creando borrador…`:''].filter(Boolean).join(' · ')}${total>msgs.length?` · ${total-msgs.length} ya en el Histórico de aprobaciones`:''}.</div>
       ${b.startAlert?`<div style="background:rgba(217,119,6,.1);border:1px solid var(--yellow);border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:13px">
         ⚠️ <b>${escapeHtml((b.employeeName||'').split(' ')[0])} inicia el ${hire} y ese día ${escapeHtml(b.startAlert)}.</b> Si hace falta, negocia la fecha de ingreso con anticipación.</div>`:''}
       ${b.photoStatus==='missing'?`<div style="background:rgba(217,119,6,.1);border:1px solid var(--yellow);border-radius:10px;padding:10px 14px;margin-bottom:10px">
         ⚠️ Sin foto en BambooHR — el flyer no se generó. <input type="file" id="photo-input-${b.id}" accept="image/*"> <button class="act-btn" onclick="uploadBatchPhoto(${b.id})">📎 Subir foto</button></div>`:''}
       ${msgs.map(msgRow).join('')}
-      ${meetingLine(meetingsByBatch[b.id])}
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px">
         ${pending?`<button class="act-btn approve" onclick="approveBatch(${b.id})">✅ Aprobar todos (${pending})</button>
         <button class="act-btn reject" onclick="rejectBatch(${b.id})">❌ Rechazar todos los pendientes</button>`:''}
@@ -443,9 +562,11 @@ function showDraftResults(title, results) {
 async function approveMsg(id) {
   try {
     const r = await api(`/agent/messages/${id}/approve`, {method:'POST'});
-    showDraftResults('Resultado de la aprobación', [r]);
+    showDraftResults(r.status==='failed' ? 'No se creó el borrador — sigue en Mensajes programados para reintentar'
+      : r.status==='draft_created' ? 'Borrador creado — pasó al Histórico de aprobaciones'
+      : 'Aprobado — el borrador se está creando', [r]);
   } catch(e) { showToast('❌ Error: '+escapeHtml(e.message), 8000); }
-  if (currentPage==='approvals') renderApprovals(); else render(currentPage);
+  render(currentPage); refreshSyncStatus();
 }
 
 async function rejectMsg(id) {
@@ -458,7 +579,7 @@ async function rejectMsg(id) {
 async function retryMsg(id) {
   try {
     const r = await api(`/agent/messages/${id}/retry`, {method:'POST'});
-    showDraftResults('Resultado del reintento', [r]);
+    showDraftResults(r.status==='failed' ? 'El reintento falló — sigue en Mensajes programados' : 'Reintento — borrador creado, pasó al Histórico de aprobaciones', [r]);
   } catch(e) { showToast('❌ Error: '+escapeHtml(e.message), 8000); }
   render(currentPage);
 }
@@ -486,8 +607,14 @@ function fmtShort(d) {
 async function renderScheduling() {
   const c = document.getElementById('page-content');
   try {
-    const mtgs = await api('/agent/meetings');
-    meetingsById = Object.fromEntries(mtgs.map(m=>[m.id, m]));
+    const focus = schedFocus; schedFocus = null;
+    const all = await api('/agent/meetings');
+    meetingsById = Object.fromEntries(all.map(m=>[m.id, m]));
+    // Scheduled / skipped sessions live in the Histórico de aprobaciones. A scheduled
+    // one stays here only while a same-day hire still has to be added to it (➕ Agregar),
+    // or when it was opened from the history to be rescheduled.
+    const mtgs = all.filter(m => ['pending_approval','failed','scheduling'].includes(m.status)
+      || (m.missingHires||[]).length || m.id===focus);
     mtgs.forEach(initExtras);
     const days = [];
     mtgs.forEach(m => {
@@ -495,14 +622,18 @@ async function renderScheduling() {
       g.items.push(m); (m.hires||[]).forEach(h => g.people[h.batchId] = h);
     });
     c.innerHTML = `
-      <div class="page-header"><div class="page-title">Agendamiento</div><div class="page-sub">Las sesiones de onboarding de cada ingreso: HR, IT, Payroll (solo Colombia), Product Onboarding y First month. Panda Bear las propone teniendo en cuenta feriados, ausencias en BambooHR y calendarios ocupados. Nada se agenda hasta que tú le das <b>📅 Agendar</b>.</div></div>
-      ${days.length===0 ? '<div class="section"><div class="empty"><div class="icon">📅</div>No hay ingresos próximos para agendar.</div></div>'
+      <div class="page-header"><div class="page-title">Agendamientos</div><div class="page-sub">Las sesiones de onboarding de cada ingreso: HR, IT, Payroll (solo Colombia), Product Onboarding y First month. Panda Bear las propone teniendo en cuenta feriados, ausencias en BambooHR y calendarios ocupados. Nada se agenda hasta que tú le das <b>📅 Agendar</b>. Lo que agendas u omites sale de aquí y pasa al Histórico de aprobaciones.</div></div>
+      ${days.length===0 ? '<div class="section"><div class="empty"><div class="icon">📅</div>No hay sesiones por agendar.<br><small>Las ya agendadas están en el <span style="cursor:pointer;text-decoration:underline" onclick="navTo(\'approvals\')">Histórico de aprobaciones</span>.</small></div></div>'
         : days.map(g => `<div class="section" style="margin-bottom:22px">
             <div style="font-size:17px;font-weight:700;margin-bottom:4px">📅 Ingresan el ${fmtDate(g.date)}</div>
             <div style="font-size:13px;color:var(--text2);margin-bottom:12px">${Object.values(g.people).map(h=>`👤 <b>${escapeHtml(h.name)}</b> · ${escapeHtml(h.location||'')} · ${h.language==='es'?'español':'no hispanohablante'}`).join(' &nbsp; ')}</div>
             ${g.items.map(meetingCard).join('')}</div>`).join('')}`;
     mtgs.filter(m=>SLOT_KINDS.includes(m.sessionType) && (m.status==='pending_approval'||m.status==='failed'))
       .forEach(m=>loadSlots(m.id, m.sessionType==='first_month' ? null : m.startDate));
+    if (focus && meetingsById[focus]?.status==='scheduled' && document.getElementById(`mt-resched-${focus}`)) {
+      toggleReschedule(focus);
+      document.getElementById(`mt-resched-${focus}`).scrollIntoView({behavior:'smooth', block:'center'});
+    }
   } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${escapeHtml(e.message)}</div></div>`; }
 }
 
@@ -737,7 +868,7 @@ async function scheduleMeeting(id) {
   if (!confirm(question)) return;
   try {
     const r = await api(`/agent/meetings/${id}/schedule`, {method:'POST', body: JSON.stringify(f)});
-    if (r.ok) showToast(m.sessionType==='product' ? '➕ Agregada/o a esa sesión.' : '📅 Agendada — ya está en tu calendario.', 6000);
+    if (r.ok) { dropMeetingCard(id); showToast((m.sessionType==='product' ? '➕ Agregada/o a esa sesión.' : '📅 Agendada — ya está en tu calendario.') + ' Pasó al Histórico de aprobaciones.', 6000); }
     else showToast('❌ No se pudo agendar: '+escapeHtml(r.error||''), 10000);
   } catch(e) { showToast('❌ '+escapeHtml(e.message), 8000); }
   renderScheduling();
@@ -789,9 +920,19 @@ async function addMissingHires(id) {
   renderScheduling();
 }
 
+// A scheduled/skipped session leaves the inbox at once: reloading Agendamientos takes a few
+// seconds (it reads the calendars), and the card must not linger as if still pending.
+function dropMeetingCard(id) {
+  const card = document.getElementById(`mtg-${id}`);
+  if (!card) return;
+  const day = card.parentElement;
+  card.remove();
+  if (day && !day.querySelector('.approval-card')) day.remove();
+}
+
 async function skipMeeting(id) {
   if (!confirm('¿Omitir esta sesión para este ingreso? No se agendará nada.')) return;
-  try { await api(`/agent/meetings/${id}/skip`, {method:'POST'}); showToast('⏭ Omitida.'); }
+  try { await api(`/agent/meetings/${id}/skip`, {method:'POST'}); dropMeetingCard(id); showToast('⏭ Omitida — pasó al Histórico de aprobaciones.'); }
   catch(e) { showToast('❌ '+escapeHtml(e.message), 8000); }
   renderScheduling();
 }
@@ -830,7 +971,7 @@ async function renderConversation() {
   const c = document.getElementById('page-content');
   const mode = CHAT_MODES[chatMode];
   c.innerHTML = `
-    <div class="page-header"><div class="page-title">Conversation</div><div class="page-sub">Habla directamente con Panda Bear. Consulta, pide cambios, explora datos.</div></div>
+    <div class="page-header"><div class="page-title">Chats internos</div><div class="page-sub">Tu chat privado con Panda Bear: consulta, pide cambios, explora datos. Nada de lo que escribes aquí se le envía a nadie.</div></div>
     <div class="section">
       <div class="section-header">
         <div class="section-title">🐼 Panda Bear — ${mode.label}</div>
@@ -901,20 +1042,6 @@ async function sendChat() {
   msgs.scrollTop = msgs.scrollHeight;
 }
 
-// ── MESSAGES ──────────────────────────────────────────────────────
-async function renderMessages() {
-  const c = document.getElementById('page-content');
-  try {
-    const msgs = await api('/agent/messages');
-    c.innerHTML = `
-      <div class="page-header"><div class="page-title">Messages</div><div class="page-sub">Todos los mensajes generados por el agente</div></div>
-      <div class="section">
-        <div class="section-header"><div class="section-title">Todos los mensajes <span style="color:var(--text3);font-weight:400">(${msgs.length})</span></div></div>
-        ${msgs.length===0?'<div class="empty"><div class="icon">📭</div>No hay mensajes todavía.</div>'
-          :renderMsgTable(msgs)}
-      </div>`;
-  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error cargando mensajes.</div></div>`; }
-}
 
 // ── HIRES ────────────────────────────────────────────────────────
 async function renderHires() {
@@ -922,286 +1049,78 @@ async function renderHires() {
   try {
     const hires = await api('/agent/recent-hires');
     c.innerHTML = `
-      <div class="page-header"><div class="page-title">Upcoming Hires</div><div class="page-sub">Próximos ingresos detectados en BambooHR — próximos 60 días</div></div>
+      <div class="page-header"><div class="page-title">Próximos ingresos</div><div class="page-sub">Ingresos de los próximos 60 días según BambooHR. El sync automático corre a las 8:00, 12:00 y 16:00 (hora Colombia); con ▶ Run Sync lo corres ya. El sync solo prepara mensajes en Mensajes programados: nunca envía ni crea borradores.</div></div>
+      <div class="btn-row">
+        <button class="btn-primary" id="sync-btn" onclick="runSync(false)">▶ Run Sync</button>
+        <button class="btn-secondary" id="dry-btn" onclick="runSync(true)">🔍 Dry Run</button>
+      </div>
       <div class="section">
         <div class="section-header"><div class="section-title">Próximos <span style="color:var(--text3);font-weight:400">(${hires.length})</span></div></div>
         ${hires.length===0?'<div class="empty"><div class="icon">🎉</div>No hay ingresos próximos.</div>'
           :`<table class="table"><thead><tr><th>Empleado</th><th>Cargo</th><th>Inicio</th><th>Manager</th><th>Idioma</th><th>Notif. Manager</th><th>Estado</th></tr></thead><tbody>
           ${hires.map(h=>`<tr>
-            <td><div style="font-weight:600">${h.firstName} ${h.lastName}</div><div style="font-size:11px;color:var(--text3)">${h.workEmail||''}</div></td>
-            <td style="color:var(--text2)">${h.jobTitle||'—'}</td>
+            <td><div style="font-weight:600">${escapeHtml(h.firstName)} ${escapeHtml(h.lastName)}</div><div style="font-size:11px;color:var(--text3)">${escapeHtml(h.workEmail||'')}</div></td>
+            <td style="color:var(--text2)">${escapeHtml(h.jobTitle||'—')}</td>
             <td style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--teal)">${h.hireDate} <span style="color:var(--text3)">(${h.daysUntilHire}d)</span></td>
-            <td style="color:var(--text2)">${h.supervisor||'—'}</td>
+            <td style="color:var(--text2)">${escapeHtml(h.supervisor||'—')}</td>
             <td><span class="badge ${h.language==='es'?'sent':'pending'}">${h.language==='es'?'🇪🇸 ES':'🇬🇧 EN'}</span></td>
             <td style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text3)">${h.managerMessageDate||'—'}</td>
-            <td><span class="badge ${h.alreadyProcessed?'sent':'pending_approval'}">${h.alreadyProcessed?'✓ Listo':'⏳ Pendiente'}</span></td>
+            <td><span class="badge ${h.alreadyProcessed?'sent':'pending_approval'}">${h.alreadyProcessed?'✓ Mensajes preparados':'⏳ Sin preparar'}</span></td>
           </tr>`).join('')}
           </tbody></table>`}
       </div>`;
-  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
+  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${escapeHtml(e.message)}</div></div>`; }
 }
 
 // ── RUNS ─────────────────────────────────────────────────────────
 async function renderRuns() {
   const c = document.getElementById('page-content');
   try {
-    const runs = await api('/agent/runs');
+    const [runs, msgs] = await Promise.all([api('/agent/runs'), api('/agent/execution-history')]);
     c.innerHTML = `
-      <div class="page-header"><div class="page-title">Runs</div><div class="page-sub">Historial de ciclos de detección del agente</div></div>
+      <div class="page-header"><div class="page-title">Historial de ejecuciones</div><div class="page-sub">Cada sync (🤖 automático o 👤 manual) y, plegado abajo, el rastro técnico de cada mensaje.</div></div>
       <div class="section">
-        <div class="section-header"><div class="section-title">Historial <span style="color:var(--text3);font-weight:400">(${runs.length})</span></div></div>
-        ${runs.length===0?'<div class="empty"><div class="icon">⚡</div>No hay runs. Corre un sync para comenzar.</div>'
-          :`<table class="table"><thead><tr><th>ID</th><th>Inicio</th><th>Estado</th><th>Escaneados</th><th>Nuevos</th><th>Mensajes</th><th>Tipo</th></tr></thead><tbody>
+        <div class="section-header"><div class="section-title">Syncs <span style="color:var(--text3);font-weight:400">(${runs.length})</span></div></div>
+        ${runs.length===0?'<div class="empty"><div class="icon">⚡</div>No hay syncs todavía.</div>'
+          :`<table class="table"><thead><tr><th>ID</th><th>Inicio</th><th>Origen</th><th>Estado</th><th>Escaneados</th><th>Nuevos</th><th>Mensajes</th><th>Tipo</th></tr></thead><tbody>
           ${runs.map(r=>`<tr>
             <td style="font-family:'JetBrains Mono',monospace;color:var(--text3)">#${r.id}</td>
             <td style="font-size:12px">${new Date(r.startedAt).toLocaleString()}</td>
-            <td>${badge(r.status==='completed'?'completed':r.status==='failed'?'failed':'running')}</td>
+            <td style="font-size:12px">${r.trigger==='auto'?'🤖 Automático':r.trigger==='manual'?'👤 Manual':'<span style="color:var(--text3)">—</span>'}</td>
+            <td>${r.status==='failed'?'<span class="badge failed">✗ Falló</span>':badge(r.status==='completed'?'completed':'running')}${r.error?`<div style="font-size:11px;color:var(--red);margin-top:4px;max-width:320px">${escapeHtml(r.error)}</div>`:''}</td>
             <td style="text-align:center">${r.employeesScanned}</td>
             <td style="text-align:center;color:var(--teal);font-weight:600">${r.newEmployees}</td>
             <td style="text-align:center">${r.messagesSent}</td>
             <td><span class="badge ${r.dryRun?'skipped':'sent'}">${r.dryRun?'🔍 Dry':'🚀 Live'}</span></td>
           </tr>`).join('')}
           </tbody></table>`}
-      </div>`;
-  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
-}
-
-// ── IDENTITY ─────────────────────────────────────────────────────
-async function renderIdentity() {
-  const c = document.getElementById('page-content');
-  try {
-    const id = await api('/agent/identity');
-    c.innerHTML = `
-      <div class="page-header"><div class="page-title">Agent Identity</div><div class="page-sub">Quién es Panda Bear y qué lo gobierna</div></div>
-      <div class="identity-card">
-        <div style="font-size:36px;margin-bottom:8px">🐼</div>
-        <div class="id-name">${id.name}</div>
-        <div class="id-role">${id.role} · ${id.company} · v${id.version}</div>
-        <div class="id-section">
-          <div class="id-section-title">Propósito</div>
-          <div style="font-size:13.5px;line-height:1.6;color:var(--text2)">${id.purpose}</div>
-        </div>
-        <div class="id-section">
-          <div class="id-section-title">Optimización</div>
-          <div style="font-size:13.5px;color:var(--text2)">${id.optimization}</div>
-        </div>
       </div>
-      <div class="section">
-        <div class="section-header"><div class="section-title">Constitución — Reglas Absolutas</div></div>
-        <div style="padding:16px">
-          ${id.constitution.map(r=>`<div class="constitution-rule"><strong>[${r.code}]</strong> ${r.rule}</div>`).join('')}
-        </div>
-      </div>
-      <div class="section">
-        <div class="section-header"><div class="section-title">Goals</div></div>
-        <div style="padding:16px">
-          ${id.goals.map(g=>`<div class="goal-item"><span class="goal-id">${g.id}</span><div style="font-size:13px">${g.description}</div></div>`).join('')}
-        </div>
-      </div>
-      <div class="section">
-        <div class="section-header"><div class="section-title">Action Principle</div></div>
-        <div style="padding:16px">
-          <div style="display:flex;gap:0;align-items:center;flex-wrap:wrap;margin-bottom:10px">
-            ${id.action_principle.flow.map((f,i)=>`<span style="background:var(--bg3);border:1px solid var(--border);border-radius:6px;padding:6px 14px;font-size:13px;font-weight:600">${f}</span>${i<id.action_principle.flow.length-1?'<span style="margin:0 6px;color:var(--text3)">→</span>':''}`).join('')}
-          </div>
-          <div style="font-size:13px;color:var(--text2)">${id.action_principle.rule}</div>
-        </div>
-      </div>
-      <div class="section">
-        <div class="section-header"><div class="section-title">Skills (${id.skills.length})</div></div>
-        <div style="padding:14px 16px">
-          ${id.skills.map(s=>`<span class="skill-pill">${s.name}<span style="color:var(--text3);font-weight:400;margin-left:4px">${s.category}</span></span>`).join('')}
-        </div>
-      </div>
-      <div class="section">
-        <div class="section-header"><div class="section-title">Services (${id.services.length})</div></div>
-        <table class="table"><thead><tr><th>Servicio</th><th>Estado</th><th>Descripción</th></tr></thead><tbody>
-          ${id.services.map(s=>`<tr>
-            <td style="font-family:'JetBrains Mono',monospace;font-size:12px">${s.name}</td>
-            <td>${badge(s.status==='running'?'sent':s.status==='stopped'?'skipped':'failed')}</td>
-            <td style="color:var(--text2);font-size:12px">${s.description}</td>
-          </tr>`).join('')}
-        </tbody></table>
-      </div>`;
-  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
-}
-
-// ── MEMORY ───────────────────────────────────────────────────────
-async function renderMemory() {
-  const c = document.getElementById('page-content');
-  try {
-    const mem = await api('/agent/memory');
-    const lessons = await api('/agent/lessons');
-    c.innerHTML = `
-      <div class="page-header"><div class="page-title">Agent Memory</div><div class="page-sub">Lo que Panda Bear recuerda de cada onboarding</div></div>
-      <div class="section">
-        <div class="section-header"><div class="section-title">Memory Summary</div></div>
-        <div style="padding:16px">
-          <div class="memory-row">
-            ${Object.entries(mem).map(([k,v])=>`<div class="memory-stat"><div class="memory-stat-val">${v}</div><div class="memory-stat-label">${k}</div></div>`).join('')}
-          </div>
-        </div>
-      </div>
-      <div class="section">
-        <div class="section-header"><div class="section-title">Lessons Learned (${lessons.length})</div></div>
-        ${lessons.length===0?'<div class="empty"><div class="icon">📚</div>Aún no hay lecciones registradas. Cada onboarding completo genera aprendizaje.</div>'
-          :`<table class="table"><thead><tr><th>Empleado</th><th>País</th><th>Aprobados</th><th>Editados</th><th>Rechazados</th><th>Qué funcionó</th></tr></thead><tbody>
-          ${lessons.map(l=>`<tr>
-            <td style="font-weight:600">${l.employeeName}</td>
-            <td style="color:var(--text3)">${l.country||'—'}</td>
-            <td style="color:var(--green)">${l.messagesApproved}</td>
-            <td style="color:var(--yellow)">${l.messagesEdited}</td>
-            <td style="color:var(--red)">${l.messagesRejected}</td>
-            <td style="font-size:12px;color:var(--text2);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${l.whatWorked||'—'}</td>
+      <details class="section">
+        <summary class="section-header" style="cursor:pointer"><span class="section-title">Rastro por mensaje <span style="color:var(--text3);font-weight:400">(${msgs.length}) — clic para ver</span></span></summary>
+        ${msgs.length===0?'<div class="empty">Sin registros todavía.</div>'
+          :`<table class="table"><thead><tr><th>Empleado</th><th>Tipo</th><th>Estado</th><th>Creado</th><th>Borrador / envío</th><th>Intentos</th><th>Error</th></tr></thead><tbody>
+          ${msgs.map(m=>`<tr>
+            <td><div style="font-weight:600">${escapeHtml(m.employeeName)}</div><div style="font-size:11px;color:var(--text3)">${escapeHtml(m.employeeJobTitle||'')}</div></td>
+            <td style="font-size:12px;color:var(--teal)">${TYPE_LABEL[m.messageType]||m.messageType}</td>
+            <td>${badge(m.status)}</td>
+            <td style="color:var(--text3);font-size:11px;font-family:'JetBrains Mono',monospace">${m.createdAt?new Date(m.createdAt).toLocaleString():'—'}</td>
+            <td style="color:var(--text3);font-size:11px;font-family:'JetBrains Mono',monospace">${m.sentAt?new Date(m.sentAt).toLocaleString():'—'}</td>
+            <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:12px">${m.retries||0}</td>
+            <td style="font-size:11px;color:var(--red);max-width:220px">${escapeHtml(m.deliveryError||'—')}</td>
           </tr>`).join('')}
           </tbody></table>`}
-      </div>`;
-  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
+      </details>`;
+  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${escapeHtml(e.message)}</div></div>`; }
 }
 
-// ── DECISIONS ────────────────────────────────────────────────────
-async function renderDecisions() {
-  const c = document.getElementById('page-content');
-  try {
-    const decs = await api('/agent/decisions');
-    c.innerHTML = `
-      <div class="page-header"><div class="page-title">Decision History</div><div class="page-sub">Cada decisión que Panda Bear tomó y por qué</div></div>
-      <div class="section">
-        <div class="section-header"><div class="section-title">Decisiones recientes <span style="color:var(--text3);font-weight:400">(${decs.length})</span></div></div>
-        ${decs.length===0?'<div class="empty"><div class="icon">📋</div>No hay decisiones registradas todavía.</div>'
-          :`<table class="table"><thead><tr><th>Skill</th><th>Decisión</th><th>Razonamiento</th><th>Confianza</th><th>Fecha</th></tr></thead><tbody>
-          ${decs.map(d=>`<tr>
-            <td style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--teal)">${d.skillName}</td>
-            <td style="font-size:12px;font-weight:600;max-width:160px">${d.decision}</td>
-            <td style="font-size:12px;color:var(--text2);max-width:240px">${d.reasoning||'—'}</td>
-            <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:12px">${Math.round((d.confidence||1)*100)}%</td>
-            <td style="color:var(--text3);font-size:11px;font-family:'JetBrains Mono',monospace">${new Date(d.createdAt).toLocaleString()}</td>
-          </tr>`).join('')}
-          </tbody></table>`}
-      </div>`;
-  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
-}
 
-// ── SERVICES ─────────────────────────────────────────────────────
-async function renderServices() {
-  const c = document.getElementById('page-content');
-  try {
-    const health = await api('/agent/kernel/health');
-    const metrics = await api('/agent/kernel/metrics');
-    c.innerHTML = `
-      <div class="page-header"><div class="page-title">Services & Kernel</div><div class="page-sub">Runtime del agente — todos los servicios bajo control del Kernel</div></div>
-      <div class="section">
-        <div class="section-header"><div class="section-title">Kernel Status</div></div>
-        <div style="padding:16px">
-          <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px">
-            <div class="memory-stat"><div class="memory-stat-val" style="color:${health.kernel.status==='healthy'?'var(--green)':'var(--yellow)'}">${health.kernel.status}</div><div class="memory-stat-label">Kernel</div></div>
-            <div class="memory-stat"><div class="memory-stat-val">${health.kernel.totalServices}</div><div class="memory-stat-label">Total Services</div></div>
-            <div class="memory-stat"><div class="memory-stat-val" style="color:var(--green)">${health.kernel.healthyServices}</div><div class="memory-stat-label">Healthy</div></div>
-          </div>
-          <div style="font-size:12px;color:var(--text3)">Kernel arrancó: ${health.kernel.startedAt ? new Date(health.kernel.startedAt).toLocaleString() : 'Desconocido'}</div>
-        </div>
-      </div>
-      ${Object.entries(health.services).map(([name,svc])=>`
-        <div class="section">
-          <div class="section-header">
-            <div class="section-title">${name} <span style="color:var(--text3);font-weight:400;font-size:12px;margin-left:8px">start() · stop() · health() · heartbeat() · recover() · metrics()</span></div>
-            ${badge(svc.status==='running'?'sent':svc.status==='stopped'?'skipped':'failed')}
-          </div>
-          <div style="padding:14px 18px;font-size:13px">
-            <div style="display:flex;gap:20px;flex-wrap:wrap;color:var(--text2)">
-              <div>Arrancó: <strong>${svc.startedAt?new Date(svc.startedAt).toLocaleString():'—'}</strong></div>
-              <div>Heartbeats: <strong>${svc.heartbeatCount||0}</strong></div>
-              ${svc.employeeCount!==undefined?`<div>Empleados: <strong>${svc.employeeCount}</strong></div>`:''}
-              ${svc.messagesSent!==undefined?`<div>Mensajes enviados: <strong>${svc.messagesSent}</strong></div>`:''}
-              ${svc.workspace?`<div>Workspace: <strong>${svc.workspace}</strong></div>`:''}
-            </div>
-            ${svc.errors&&svc.errors.length>0?`<div style="margin-top:8px;color:var(--red);font-size:12px">Errores: ${svc.errors.join(', ')}</div>`:''}
-          </div>
-        </div>`).join('')}
-      <div class="btn-row" style="margin-top:8px">
-        <button class="btn-secondary" onclick="heartbeat()">💓 Send Heartbeat</button>
-      </div>`;
-  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
-}
 
-// ── OPS CENTER ───────────────────────────────────────────────────
-async function renderOpsCenter() {
-  const c = document.getElementById('page-content');
-  try {
-    const ops = await api('/agent/ops-center');
-    const color = ops.systemHealth==='green'?'green':ops.systemHealth==='yellow'?'yellow':'red';
-    const healthLabel = {green:'Sistema operacional',yellow:'Sistema degradado',red:'Fallo crítico'}[ops.systemHealth]||ops.systemHealth;
 
-    c.innerHTML = `
-      <div class="page-header"><div class="page-title">Operations Center</div><div class="page-sub">Estado del sistema en tiempo real · ${new Date(ops.timestamp).toLocaleString()}</div></div>
-      <div class="health-banner ${color}">
-        <div class="health-dot ${color}"></div>
-        <div><div class="health-title" style="color:var(--${color==='green'?'green':color==='yellow'?'yellow':'red'})">${healthLabel}</div>
-        <div class="health-sub">${ops.issues&&ops.issues.length>0?ops.issues.join(' · '):'Todos los servicios responden correctamente'}</div></div>
-      </div>
-      <div class="stats-grid">
-        <div class="stat-card"><div class="stat-label">Pending Batches</div><div class="stat-value" style="color:${ops.pendingBatches>0?'var(--purple)':'var(--text)'}">${ops.pendingBatches}</div></div>
-        <div class="stat-card"><div class="stat-label">Total Sent</div><div class="stat-value" style="color:var(--green)">${ops.totalSent||0}</div></div>
-        <div class="stat-card"><div class="stat-label">Total Failed</div><div class="stat-value" style="color:${ops.totalFailed>0?'var(--red)':'var(--text)'}">${ops.totalFailed||0}</div></div>
-        <div class="stat-card"><div class="stat-label">Active Incidents</div><div class="stat-value" style="color:${ops.activeIncidents>0?'var(--red)':'var(--text)'}">${ops.activeIncidents||0}</div></div>
-      </div>
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-bottom:16px">
-        ${opsServiceCard('BambooHR',ops.bamboo)}
-        ${opsServiceCard('Slack',ops.slack)}
-        ${opsServiceCard('Groq AI',ops.groq)}
-      </div>
-      ${ops.slack&&ops.slack.scopes?renderScopeAudit(ops.slack.scopes):''}
-      <div class="section">
-        <div class="section-header"><div class="section-title">Kernel</div></div>
-        <div style="padding:14px 18px;font-size:13px;color:var(--text2)">
-          <div style="display:flex;gap:20px;flex-wrap:wrap">
-            <div>Servicios: <strong>${ops.kernel&&ops.kernel.kernel?ops.kernel.kernel.totalServices:'—'}</strong></div>
-            <div>Saludables: <strong style="color:var(--green)">${ops.kernel&&ops.kernel.kernel?ops.kernel.kernel.healthyServices:'—'}</strong></div>
-            <div>Estado: <strong>${ops.kernel&&ops.kernel.kernel?ops.kernel.kernel.status:'—'}</strong></div>
-            <div>Arrancó: <strong>${ops.kernel&&ops.kernel.kernel&&ops.kernel.kernel.startedAt?new Date(ops.kernel.kernel.startedAt).toLocaleString():'—'}</strong></div>
-          </div>
-        </div>
-      </div>
-      <div class="btn-row">
-        <button class="btn-secondary" onclick="heartbeat()">💓 Send Heartbeat</button>
-        <button class="btn-secondary" onclick="navTo('incidents')">🚨 Ver Incidents</button>
-        <button class="btn-secondary" onclick="navTo('audit')">🎯 Production Audit</button>
-      </div>`;
-  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
-}
 
-function opsServiceCard(name, svc) {
-  if(!svc) return `<div class="section"><div style="padding:14px 18px;font-size:13px;color:var(--text3)">${name}: sin datos</div></div>`;
-  const ok = svc.connected;
-  return `<div class="section">
-    <div class="section-header"><div class="section-title" style="display:flex;align-items:center;gap:8px"><div class="dot ${ok?'green':'red'}"></div>${name}</div></div>
-    <div style="padding:12px 18px;font-size:13px;color:var(--text2)">
-      ${svc.workspace?`<div>Workspace: <strong>${svc.workspace}</strong></div>`:''}
-      ${svc.employeeCount!==undefined?`<div>Empleados: <strong>${svc.employeeCount}</strong></div>`:''}
-      ${svc.model?`<div>Modelo: <strong>${svc.model}</strong></div>`:''}
-      ${svc.error?`<div style="color:var(--red);font-size:12px;margin-top:4px">⚠ ${svc.error}</div>`:''}
-      ${!ok&&!svc.error?'<div style="color:var(--red)">No conectado</div>':''}
-    </div>
-  </div>`;
-}
 
-function renderScopeAudit(scopes) {
-  if(!scopes) return '';
-  const missing = scopes.missing||{};
-  const present = scopes.present||{};
-  if(Object.keys(missing).length===0&&Object.keys(present).length===0) return '';
-  return `<div class="section" style="margin-bottom:16px">
-    <div class="section-header">
-      <div class="section-title">Slack OAuth Scopes</div>
-      <span class="${scopes.complete?'badge sent':'badge failed'}">${scopes.complete?'✓ Completo':'✗ Faltan permisos'}</span>
-    </div>
-    <div class="scope-grid">
-      ${Object.entries(present).map(([k,desc])=>`<div class="scope-card ok"><div class="scope-name">✓ ${k}</div><div class="scope-desc">${desc}</div></div>`).join('')}
-      ${Object.entries(missing).map(([k,v])=>`<div class="scope-card ${v.critical?'miss-crit':'miss'}"><div class="scope-name">✗ ${k}${v.critical?' <span style="color:var(--red)">CRÍTICO</span>':''}</div><div class="scope-desc">${v.desc}</div><div class="scope-feature">${v.feature}</div></div>`).join('')}
-    </div>
-    ${scopes.fixSteps&&scopes.fixSteps.length>0?`<div style="padding:0 16px 16px"><div style="background:rgba(220,38,38,.06);border:1px solid rgba(220,38,38,.2);border-radius:8px;padding:12px 14px;font-size:12px;font-family:'JetBrains Mono',monospace;line-height:1.9;color:var(--text2)">${scopes.fixSteps.join('<br>')}</div></div>`:''}
-  </div>`;
-}
+
+
+
 
 // ── INCIDENTS ────────────────────────────────────────────────────
 async function renderIncidents() {
@@ -1254,89 +1173,7 @@ async function resolveIncident(id) {
   } catch(e) { showToast('❌ Error: '+e.message); }
 }
 
-// ── EXECUTION HISTORY ────────────────────────────────────────────
-async function renderExecution() {
-  const c = document.getElementById('page-content');
-  try {
-    const msgs = await api('/agent/execution-history');
-    const prepared = msgs.filter(m=>m.status==='draft_created'||m.status==='ready_for_slack_draft').length;
-    const failed = msgs.filter(m=>m.status==='failed').length;
-    c.innerHTML = `
-      <div class="page-header"><div class="page-title">Execution History</div><div class="page-sub">Audit trail completo — qué se preparó y qué falló (Panda Bear nunca envía, solo prepara)</div></div>
-      <div class="stats-grid">
-        <div class="stat-card"><div class="stat-label">Total Registros</div><div class="stat-value">${msgs.length}</div></div>
-        <div class="stat-card"><div class="stat-label">Preparados</div><div class="stat-value" style="color:var(--green)">${prepared}</div></div>
-        <div class="stat-card"><div class="stat-label">Fallidos</div><div class="stat-value" style="color:${failed>0?'var(--red)':'var(--text)'}">${failed}</div></div>
-        <div class="stat-card"><div class="stat-label">Pendientes</div><div class="stat-value" style="color:var(--purple)">${msgs.filter(m=>m.status==='pending_approval'||m.status==='pending').length}</div></div>
-      </div>
-      <div class="section">
-        <div class="section-header"><div class="section-title">Registro de Entregas</div></div>
-        ${msgs.length===0?'<div class="empty"><div class="icon">📦</div>Sin registros todavía. Corre un sync y aprueba un batch.</div>'
-          :`<table class="table"><thead><tr><th>Empleado</th><th>Tipo</th><th>Estado</th><th>Creado</th><th>Entregado</th><th>Batch</th><th>Intentos</th><th>Error</th></tr></thead><tbody>
-          ${msgs.map(m=>`<tr>
-            <td><div style="font-weight:600">${m.employeeName}</div><div style="font-size:11px;color:var(--text3)">${m.employeeJobTitle||''}</div></td>
-            <td style="font-size:12px;color:var(--teal)">${TYPE_LABEL[m.messageType]||m.messageType}</td>
-            <td>${badge(m.status)}</td>
-            <td style="color:var(--text3);font-size:11px;font-family:'JetBrains Mono',monospace">${m.createdAt?new Date(m.createdAt).toLocaleString():'—'}</td>
-            <td style="color:var(--text3);font-size:11px;font-family:'JetBrains Mono',monospace">${m.sentAt||m.deliveredAt?new Date(m.sentAt||m.deliveredAt).toLocaleString():'—'}</td>
-            <td style="color:var(--text3);font-size:11px">${m.batchId?'#'+m.batchId:'—'}</td>
-            <td style="text-align:center;font-family:'JetBrains Mono',monospace;font-size:12px">${m.retries||0}</td>
-            <td style="font-size:11px;color:var(--red);max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${m.deliveryError||'—'}</td>
-          </tr>`).join('')}
-          </tbody></table>`}
-      </div>`;
-  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error: ${e.message}</div></div>`; }
-}
 
-// ── PRODUCTION AUDIT ─────────────────────────────────────────────
-async function renderProdAudit() {
-  const c = document.getElementById('page-content');
-  try {
-    c.innerHTML = '<div class="loading"><span class="spinner"></span> Ejecutando auditoría de producción...</div>';
-    const audit = await api('/agent/production-audit');
-    const score = audit.overallScore||0;
-    const scoreColor = score>=80?'var(--green)':score>=60?'var(--yellow)':'var(--red)';
-
-    c.innerHTML = `
-      <div class="page-header"><div class="page-title">Production Readiness Audit</div><div class="page-sub">Scored honestamente. Sin indulgencia.</div></div>
-      <div class="health-banner ${score>=80?'green':score>=60?'yellow':'red'}">
-        <div>
-          <div class="health-title" style="color:${scoreColor};font-size:40px;font-family:'JetBrains Mono',monospace">${score}/100</div>
-          <div style="font-size:14px;font-weight:700;margin-top:4px">${audit.recommendation||''}</div>
-          <div style="font-size:12px;margin-top:4px;opacity:.75">${audit.productionReady?'✓ Listo para producción':'✗ No listo para producción'}</div>
-        </div>
-      </div>
-      ${audit.criticalBlockers&&audit.criticalBlockers.length>0?`
-        <div class="section" style="margin-bottom:16px;border-color:rgba(220,38,38,.3)">
-          <div class="section-header" style="background:rgba(220,38,38,.05)"><div class="section-title" style="color:var(--red)">⛔ Bloqueadores Críticos (${audit.criticalBlockers.length})</div></div>
-          <div style="padding:14px 18px">
-            ${audit.criticalBlockers.map(b=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px"><span style="color:var(--red);font-size:16px">✗</span><div style="font-size:13px">${b}</div></div>`).join('')}
-          </div>
-        </div>` : ''}
-      ${audit.dependsOnFounder&&audit.dependsOnFounder.length>0?`
-        <div class="section" style="margin-bottom:16px;border-color:rgba(217,119,6,.3)">
-          <div class="section-header" style="background:rgba(217,119,6,.05)"><div class="section-title" style="color:var(--yellow)">⚡ Depende del Fundador (${audit.dependsOnFounder.length})</div></div>
-          <div style="padding:14px 18px">
-            ${audit.dependsOnFounder.map(b=>`<div style="display:flex;gap:8px;align-items:flex-start;margin-bottom:8px"><span style="color:var(--yellow);font-size:14px">→</span><div style="font-size:13px">${b}</div></div>`).join('')}
-          </div>
-        </div>` : ''}
-      <div class="section">
-        <div class="section-header"><div class="section-title">8 Dimensiones</div></div>
-        <div class="audit-grid">
-          ${Object.entries(audit.dimensions||{}).map(([key,dim])=>{
-            const s=dim.score||0;
-            const cl=s>=80?'var(--green)':s>=60?'var(--yellow)':'var(--red)';
-            return `<div class="audit-card">
-              <div class="audit-label">${key.replace(/_/g,' ')}</div>
-              <div class="audit-score" style="color:${cl}">${s}</div>
-              <div class="audit-bar"><div class="audit-fill" style="width:${s}%;background:${cl}"></div></div>
-              ${dim.issues&&dim.issues.length>0?`<div class="audit-issues">${dim.issues.slice(0,2).map(i=>`• ${i}`).join('<br>')}</div>`:''}
-            </div>`;
-          }).join('')}
-        </div>
-      </div>`;
-  } catch(e) { c.innerHTML = `<div class="section"><div class="empty">⚠️ Error ejecutando auditoría: ${e.message}</div></div>`; }
-}
 
 // ── ACTIONS ──────────────────────────────────────────────────────
 async function runSync(dry) {
@@ -1345,9 +1182,9 @@ async function runSync(dry) {
   try {
     const r = await api('/agent/sync',{method:'POST',body:JSON.stringify({dryRun:dry,lookbackDays:60})});
     showToast(`✅ ${r.agentNote||`${r.newEmployees} nuevo(s), ${r.messagesSent} mensaje(s) preparados.`}`,6000);
-    setTimeout(()=>render(currentPage),800);
+    setTimeout(()=>{render(currentPage); refreshSyncStatus();},800);
   } catch(e) {
-    showToast('❌ Sync falló: '+e.message,5000);
+    showToast('❌ Sync falló: '+e.message,8000); refreshSyncStatus();
     if(btn){btn.disabled=false;btn.innerHTML=dry?'🔍 Dry Run':'▶ Run Sync';}
   }
 }
@@ -1355,10 +1192,10 @@ async function runSync(dry) {
 async function approveBatch(id) {
   try{
     const r=await api(`/agent/batches/${id}/approve`,{method:'POST'});
-    showDraftResults('Aprobar todos — resultado por borrador', r.results||[]);
+    showDraftResults('Aprobar todos — los borradores creados pasan al Histórico; los fallidos siguen en la bandeja para reintentar', r.results||[]);
   }
   catch(e){showToast('❌ Error: '+escapeHtml(e.message), 8000);}
-  render(currentPage);
+  render(currentPage); refreshSyncStatus();
 }
 async function rejectBatch(id) {
   if (!confirm('¿Rechazar todos los mensajes pendientes de este ingreso?')) return;
@@ -1450,10 +1287,7 @@ function viewMsg(id,content,name,status){
   document.getElementById('modal').style.display='flex';
 }
 
-async function heartbeat(){
-  try{const r=await api('/agent/kernel/heartbeat',{method:'POST'});showToast('💓 Heartbeat OK — '+JSON.stringify(r).slice(0,80));}
-  catch(e){showToast('❌ Heartbeat falló: '+e.message);}
-}
+
 
 function closeModal(e){
   if(!e||e.target===document.getElementById('modal'))
@@ -1461,7 +1295,9 @@ function closeModal(e){
 }
 
 // Start
-render('brief');
+render('hires');
+refreshSyncStatus();
+setInterval(refreshSyncStatus, 60000);
 </script>
 </body>
 </html>
