@@ -11,22 +11,21 @@ El menú tiene una sola pestaña por función, en este orden:
 
 | Pestaña | Para qué sirve |
 |---|---|
-| 👤 **Próximos ingresos** | Página de inicio. Ingresos de los próximos 60 días según BambooHR, con ▶ Run Sync (y 🔍 Dry Run) para correr el sync al momento. |
+| 👤 **Próximos ingresos** | Página de inicio. Ingresos de los próximos 60 días según BambooHR, con ▶ Run Sync (corre el sync ya), 🔄 Recargar (solo vuelve a leer la lista) y 🔍 Dry Run. |
 | 📨 **Mensajes programados** | Bandeja: solo lo que espera tu acción — mensajes por revisar, y los aprobados cuyo borrador se está creando o **falló** (con el motivo y 🔁 Reintentar). Aquí se aprueba. El número junto al nombre es cuántos hay. |
+| 📅 **Agendamientos programados** | Bandeja: solo las sesiones que esperan tu acción — propuestas sin agendar y las que **fallaron** al agendarse (con el motivo, para reintentar). No se mezclan con los mensajes. |
 | ✅ **Histórico de aprobaciones** | Lo ya resuelto, en **una ficha por persona**: mensajes con su borrador creado (y fecha de aprobación), sesiones agendadas (fecha y hora), y lo rechazado u omitido con ese estado. Lo más reciente arriba. Buscador por nombre y filtros por tipo (mensaje / sesión) y por estado. Aquí no se aprueba nada; solo "✓ Ya lo envié" y 🔁 Reagendar una sesión. |
-| 📅 **Agendamientos** | Bandeja: solo las sesiones que esperan tu acción — propuestas sin agendar y las que **fallaron** al agendarse (con el motivo, para reintentar). No se mezclan con los mensajes. |
 | 💬 **Chats internos** | Tu chat privado con Panda Bear (modos RR.HH. y Personal). Nada de lo que escribes ahí se le envía a nadie. |
-| 🌅 **Morning Brief** | Resumen del día (en evaluación: puede eliminarse o rehacerse). |
 | ⚡ **Historial de ejecuciones** | Sección "Sistema". Cada sync (🤖 automático / 👤 manual, con su error si falló) y, plegado, el rastro técnico de cada mensaje. |
 | 🚨 **Incidents** | Sección "Sistema". Errores de los servicios del agente. |
 
-Se quitaron Todos los mensajes, Identity, Memory, Decisions, Services, Ops Center y Prod Audit (y sus
+Se quitaron Morning Brief, Todos los mensajes, Identity, Memory, Decisions, Services, Ops Center y Prod Audit (y sus
 rutas de la API). Los datos siguen en la base de datos y el agente sigue usando su memoria y sus
 decisiones internamente; solo dejaron de mostrarse.
 
 ### Bandejas e histórico: la regla
 
-Las bandejas (Mensajes programados y Agendamientos) **solo muestran lo pendiente de tu acción**.
+Las bandejas (Mensajes programados y Agendamientos programados) **solo muestran lo pendiente de tu acción**.
 
 | Haces… | Resultado | Dónde queda |
 |---|---|---|
@@ -71,7 +70,26 @@ Cada ingreso trae 3 mensajes y **cada uno se aprueba por separado**, con sus pro
 
 El dashboard se sirve con `Cache-Control: no-store`. Si alguna vez ves la interfaz vieja, fuerza
 la recarga con **Ctrl + Shift + R** (o Ctrl + F5). La versión actual muestra la etiqueta
-"v4.7 · MENÚ DEPURADO" debajo del logo.
+"v4.9 · SIN MORNING BRIEF" debajo del logo.
+
+## Borradores vigilados (chequeo previo)
+
+Para que **cada aprobación cree su borrador de verdad**, Panda Bear comprueba, al arrancar y antes de
+cada sync automático (8:00, 12:00, 16:00), que todo lo necesario funciona — sin crear nada:
+
+| Chequeo | Para qué | Si falla |
+|---|---|---|
+| Gmail | correo de bienvenida | corre `python setup_google_auth.py` |
+| Bot de Slack | ubicar al líder y #koronet | revisa `SLACK_BOT_TOKEN` en `.env` |
+| Claude + conector de Slack | borradores de Slack (DM al líder, #koronet) | abre Claude Code en este PC: sesión iniciada y conector "claude.ai Slack" conectado |
+
+- Debajo del menú se ve **✍️ Borradores: ✅ listos** (o qué falla). Clic ahí = comprobar ahora.
+- Si algo falla, Mensajes programados muestra un aviso rojo arriba **antes de que apruebes**, y el bot
+  te escribe por DM (una vez, y otra cuando se arregla).
+- El chequeo de Claude solo busca la herramienta de borradores (modelo haiku, ~4 s, < US$0.01): nunca
+  crea, envía ni programa nada.
+- Si aun así un borrador falla al aprobar, se queda en su bandeja con el motivo y 🔁 Reintentar
+  (los de Slack se reintentan solos 3 veces; los fallidos se reintentan cada hora).
 
 ## Sync automático
 
@@ -140,6 +158,15 @@ del escritorio. Ambos lanzan `start_agent_hidden.vbs` → `run_agent_loop.bat`, 
 **reinicia el agente a los 5 segundos si se cae** y anota cada reinicio en
 `panda_bear_startup.log` (líneas `[watchdog]`). Si el agente ya está corriendo, el ícono no abre
 una segunda copia.
+
+**Revisión de salud cada 5 minutos** (`healthcheck.ps1`, desde el Programador de tareas de Windows,
+tarea "Panda Bear Healthcheck"): si `/health` no responde 3 veces seguidas (agente colgado) lo
+reinicia, y si el watchdog no está corriendo lo vuelve a lanzar. Deja registro en `healthcheck.log`.
+Para crear la tarea (una sola vez):
+`schtasks /Create /TN "Panda Bear Healthcheck" /TR "wscript.exe \"C:\PandaBearAgent\healthcheck.vbs\"" /SC MINUTE /MO 5 /F`
+
+⚠️ Si el PC se suspende, el dashboard no responde hasta que despierta (los syncs perdidos se hacen al
+despertar). Para que no pase, el PC debe estar enchufado y sin suspensión.
 
 Arranque manual (para desarrollo): `python main.py` y luego abre el dashboard en http://localhost:8000/.
 Variables de entorno: ver `.env.example`.

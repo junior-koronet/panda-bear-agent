@@ -11,3 +11,5 @@ panda_bear.db
 *.egg-info/
 
 logs/
+
+healthcheck.log

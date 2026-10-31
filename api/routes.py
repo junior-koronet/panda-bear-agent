@@ -15,9 +15,6 @@ from db.schema import get_db
 from datetime import datetime
 from skills import holidays_check
 
-# Groq retired llama-3.3-70b-versatile; the model is configurable (.env GROQ_MODEL).
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
-
 # Every route below requires a valid dashboard session (or Basic Auth for
 # scripts) — this is the entire attack surface for HR data, message
 # sending, and the personal assistant. See api/auth.py for the login flow.
@@ -45,52 +42,6 @@ def get_stats():
     return _agent.get_stats()
 
 
-@router.get("/agent/morning-brief")
-def morning_brief():
-    """The agent's morning summary. The Dashboard's home view."""
-    return _agent.morning_brief()
-
-
-@router.get("/agent/integrations/status")
-def get_integrations():
-    from skills.bamboo import _bamboo_get
-    from groq import Groq
-    import os
-
-    bamboo_ok, slack_ok, groq_ok = False, False, False
-    bamboo_count = 0
-    try:
-        data = _bamboo_get("employees/directory")
-        if data:
-            bamboo_ok = True
-            bamboo_count = len(data.get("employees", []))
-    except Exception:
-        pass
-    try:
-        svc = _agent._kernel.get_service("slack_service")
-        if svc and svc.client:
-            svc.client.auth_test()
-            slack_ok = True
-    except Exception:
-        pass
-    try:
-        groq = Groq(api_key=os.getenv("GROQ_API_KEY"))
-        groq.chat.completions.create(
-            model=GROQ_MODEL,
-            messages=[{"role": "user", "content": "ping"}],
-            max_tokens=5,
-        )
-        groq_ok = True
-    except Exception:
-        pass
-
-    return {
-        "bamboohr": {"connected": bamboo_ok, "detail": f"{bamboo_count} empleados" if bamboo_ok else "Error"},
-        "slack": {"connected": slack_ok, "detail": "Koronet" if slack_ok else "Error"},
-        "anthropic": {"connected": groq_ok, "detail": "Groq AI" if groq_ok else "Error"},
-    }
-
-
 # ── SYNC ────────────────────────────────────────────────────────
 
 class SyncRequest(BaseModel):
@@ -112,6 +63,27 @@ def sync_status():
         from services.sync_service import SyncService
         return {"times": [], "timezone": None, "nextRun": None, "lastSuccess": SyncService.last_success()}
     return svc.status()
+
+
+@router.get("/agent/drafts/health")
+def drafts_health():
+    """Last draft preflight (Gmail, Slack bot, Claude + Slack connector). Runs one if none yet."""
+    from services import draft_health
+    return draft_health.last_result() or _run_drafts_health()
+
+
+@router.post("/agent/drafts/health")
+def drafts_health_now():
+    """'Comprobar ahora' — creates nothing, only checks each dependency."""
+    return _run_drafts_health()
+
+
+def _run_drafts_health():
+    from services import draft_health
+    return draft_health.run_checks(
+        _agent._kernel.get_service("google_service"), _agent._kernel.get_service("slack_service"),
+        notify=_agent.notify_junior,
+    )
 
 
 @router.get("/agent/runs")

@@ -147,6 +147,9 @@ reminder_svc = ReminderService(
     notify_junior=agent.notify_junior,
 )
 
+from services import draft_health
+
+
 def handle_sync_failed(slot_label: str, error: str) -> None:
     """DM from the Panda Bear bot when a scheduled sync fails."""
     if not JUNIOR_SLACK_ID:
@@ -170,6 +173,7 @@ sync_svc = SyncService(
     timezone=os.getenv("SYNC_TIMEZONE", "America/Bogota"),
     lookback_days=int(os.getenv("SYNC_LOOKBACK_DAYS", 60)),
     on_failure=handle_sync_failed,
+    on_before_run=lambda: draft_health.run_checks(google_svc, slack_svc, notify=agent.notify_junior),
 )
 
 # ── Register services with the Kernel ────────────────────────────

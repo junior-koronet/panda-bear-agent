@@ -184,17 +184,16 @@ body{font-family:'Outfit',sans-serif;background:var(--bg);color:var(--text);min-
   <div class="logo">
     <div class="logo-title">Panda <span>Bear</span></div>
     <div class="logo-sub">People Ops Agent · Koronet</div>
-    <div class="logo-badge">v4.7 · MENÚ DEPURADO</div>
+    <div class="logo-badge">v4.9 · SIN MORNING BRIEF</div>
   </div>
   <div class="nav">
     <div class="nav-section">Onboarding</div>
     <div class="nav-item active" onclick="nav('hires',this)"><span class="nav-icon">👤</span> Próximos ingresos</div>
     <div class="nav-item" onclick="nav('scheduled',this)"><span class="nav-icon">📨</span> Mensajes programados <span class="nav-count" id="nav-pending-count" style="display:none"></span></div>
+    <div class="nav-item" onclick="nav('scheduling',this)"><span class="nav-icon">📅</span> Agendamientos programados <span class="nav-count" id="nav-sched-count" style="display:none"></span></div>
     <div class="nav-item" onclick="nav('approvals',this)"><span class="nav-icon">✅</span> Histórico de aprobaciones</div>
-    <div class="nav-item" onclick="nav('scheduling',this)"><span class="nav-icon">📅</span> Agendamientos</div>
     <div class="nav-section">Panda Bear</div>
     <div class="nav-item" onclick="nav('conversation',this)"><span class="nav-icon">💬</span> Chats internos</div>
-    <div class="nav-item" onclick="nav('brief',this)"><span class="nav-icon">🌅</span> Morning Brief</div>
     <div class="nav-section">Sistema</div>
     <div class="nav-item nav-quiet" onclick="nav('runs',this)"><span class="nav-icon">⚡</span> Historial de ejecuciones</div>
     <div class="nav-item nav-quiet" onclick="nav('incidents',this)"><span class="nav-icon">🚨</span> Incidents</div>
@@ -264,7 +263,7 @@ function render(page) {
   el.innerHTML = '<div class="loading"><span class="spinner"></span> Preguntando al agente...</div>';
   ({
     hires: renderHires, scheduled: renderScheduled, approvals: renderApprovals, scheduling: renderScheduling,
-    conversation: renderConversation, brief: renderBrief, runs: renderRuns, incidents: renderIncidents,
+    conversation: renderConversation, runs: renderRuns, incidents: renderIncidents,
   }[page] || renderHires)();
 }
 
@@ -273,80 +272,12 @@ const TYPE_LABEL = {employee_email:'📧 Correo Empleado',manager_slack:'💬 Sl
 function badge(s){return `<span class="badge ${s}">${BADGES[s]||s}</span>`}
 function esc(s){return(s||'').replace(/`/g,'\\`').replace(/\$/g,'\\$')}
 
-// ── MORNING BRIEF ────────────────────────────────────────────────
-async function renderBrief() {
-  const c = document.getElementById('page-content');
-  try {
-    const [brief, integ] = await Promise.all([api('/agent/morning-brief'), api('/agent/integrations/status')]);
-    const s = brief.stats;
-    c.innerHTML = `
-      <div class="page-header"><div class="page-title">Buenos días ☀️</div><div class="page-sub">Panda Bear te informa del estado del onboarding</div></div>
-      <div class="brief-box">
-        <div class="brief-panda">🐼</div>
-        <div class="brief-text">${brief.narrative}</div>
-        <div class="brief-date">${brief.date} · Estado actualizado por el agente</div>
-      </div>
-      <div class="integrations-row">
-        ${renderInt('BambooHR', integ.bamboohr)}${renderInt('Slack', integ.slack)}${renderInt('Groq AI', integ.anthropic)}
-      </div>
-      <div class="stats-grid">
-        <div class="stat-card"><div class="stat-label">Hires Today</div><div class="stat-value" style="color:${s.hiresToday>0?'var(--teal)':'var(--text)'}">${s.hiresToday}</div></div>
-        <div class="stat-card"><div class="stat-label">Pending Approval</div><div class="stat-value" style="color:${s.pendingApproval>0?'var(--purple)':'var(--text)'}">${s.pendingApproval}</div></div>
-        <div class="stat-card"><div class="stat-label">Sent</div><div class="stat-value">${s.totalSent}</div></div>
-        <div class="stat-card"><div class="stat-label">Failed</div><div class="stat-value" style="color:${s.totalFailed>0?'var(--red)':'var(--text)'}">${s.totalFailed}</div></div>
-      </div>
-      <div style="margin-bottom:12px;font-size:13px;color:var(--text2)">▶ El sync manual está en <span style="cursor:pointer;text-decoration:underline" onclick="navTo('hires')">Próximos ingresos</span>.</div>
-      ${s.pendingApproval > 0 ? `<div style="margin-bottom:12px;font-size:13px;color:var(--purple);font-weight:600">⏳ Hay ${s.pendingApproval} ingreso(s) con mensajes esperando tu revisión →  <span style="cursor:pointer;text-decoration:underline" onclick="navTo('scheduled')">Ver Mensajes programados</span></div>` : ''}
-      ${brief.upcomingToday.length > 0 ? `
-        <div class="section">
-          <div class="section-header"><div class="section-title">Ingresan hoy</div></div>
-          <table class="table"><thead><tr><th>Nombre</th><th>Cargo</th><th>Departamento</th></tr></thead><tbody>
-          ${brief.upcomingToday.map(h=>`<tr><td style="font-weight:600">${h.name}</td><td style="color:var(--text2)">${h.jobTitle||'—'}</td><td style="color:var(--text3)">${h.department||'—'}</td></tr>`).join('')}
-          </tbody></table>
-        </div>` : ''}
-      <div class="section">
-        <div class="section-header"><div class="section-title">Mensajes Recientes</div><span class="section-sub" onclick="navTo('approvals')">Ver historial →</span></div>
-        ${brief.recentMessages && brief.recentMessages.length > 0
-          ? renderMsgTable(brief.recentMessages.slice(0,5))
-          : '<div class="empty"><div class="icon">📭</div>No hay mensajes. Corre un sync para comenzar.</div>'}
-      </div>`;
 
-    // Reuse recent messages from stats if morning brief doesn't have them
-    if (!brief.recentMessages) {
-      const stats = await api('/agent/stats');
-      const tbody = c.querySelector('tbody');
-      if (tbody && stats.recentMessages) tbody.innerHTML = stats.recentMessages.slice(0,5).map(m=>msgTableRow(m)).join('');
-    }
-  } catch(e) {
-    c.innerHTML = `<div class="section"><div class="empty"><div class="icon">⚠️</div>No se pudo conectar al agente.<br><small>${e.message}</small></div></div>`;
-  }
-}
 
-function renderInt(name, s) {
-  return `<div class="int-pill"><div class="dot ${s?.connected?'green':'red'}"></div>${name}${s?.detail?`<span style="color:var(--text3);font-weight:400"> ${s.detail}</span>`:''}</div>`;
-}
 
-function renderMsgTable(msgs) {
-  return `<table class="table"><thead><tr><th>Empleado</th><th>Tipo</th><th>Manager</th><th>Estado</th><th>Fecha</th><th>Acciones</th></tr></thead><tbody>${msgs.map(m=>msgTableRow(m)).join('')}</tbody></table>`;
-}
 
-// Row of the Messages / Morning Brief tables. NOT the approval card (msgRow below).
-function msgTableRow(m) {
-  return `<tr>
-    <td><div style="font-weight:600">${m.employeeName}</div><div style="font-size:11px;color:var(--text3)">${m.employeeJobTitle||''}</div></td>
-    <td style="font-size:12px;color:var(--teal)">${TYPE_LABEL[m.messageType]||m.messageType}</td>
-    <td style="color:var(--text2)">${m.managerName||'—'}</td>
-    <td>${badge(m.status)}</td>
-    <td style="color:var(--text3);font-size:12px;font-family:'JetBrains Mono',monospace">${new Date(m.createdAt).toLocaleDateString()}</td>
-    <td>
-      <button class="act-btn" onclick="viewMsg(${m.id},\`${esc(m.messageContent)}\`,'${m.employeeName}','${m.status}')">👁</button>
-      ${m.status==='pending_approval'?`<button class="act-btn" onclick="openEdit(${m.id},\`${esc(m.messageContent)}\`,'${m.employeeName}')">✏️</button>`:''}
-      ${m.status==='pending_approval'?`<button class="act-btn" onclick="testDm(${m.id})">🔔</button>`:''}
-      ${m.status==='pending_approval'?`<button class="act-btn" onclick="skipMsg(${m.id})">⏭</button>`:''}
-      ${m.status==='failed'?`<button class="act-btn" onclick="retryMsg(${m.id})">🔁 Reintentar</button>`:''}
-      ${(m.status==='draft_created'||m.status==='ready_for_slack_draft')?`<button class="act-btn" onclick="markSent(${m.id})" title="Marcar como ya enviado por ti">✓ Ya lo envié</button>`:''}
-    </td></tr>`;
-}
+
+
 
 // ── MENSAJES PROGRAMADOS ─────────────────────────────────────────
 // Messages the agent prepared that wait for Junior's review. Approving one
@@ -354,9 +285,9 @@ function msgTableRow(m) {
 async function renderScheduled() {
   const c = document.getElementById('page-content');
   try {
-    const hires = await api('/agent/scheduled-messages');
+    const [hires, health] = await Promise.all([api('/agent/scheduled-messages'), api('/agent/drafts/health').catch(()=>null)]);
     setPendingCount(hires.reduce((n,b)=>n+(b.messages||[]).length, 0));
-    c.innerHTML = `
+    c.innerHTML = draftHealthBanner(health) + `
       <div class="page-header"><div class="page-title">Mensajes programados</div><div class="page-sub">Mensajes que preparó Panda Bear y esperan tu revisión. Aprobar = crear el borrador (nunca se envía). Lo que apruebas, rechazas u omites sale de aquí y pasa al <span style="cursor:pointer;text-decoration:underline" onclick="navTo('approvals')">Histórico de aprobaciones →</span></div></div>
       ${hires.length === 0
         ? '<div class="section"><div class="empty"><div class="icon">📭</div>No hay mensajes pendientes de revisión.<br><small>El sync automático revisa BambooHR 3 veces al día y deja aquí los nuevos ingresos.</small></div></div>'
@@ -428,7 +359,7 @@ async function renderApprovals() {
     histData = await api('/agent/approvals/history');
     const sel = 'background:var(--bg3);border:1px solid var(--border);border-radius:8px;padding:8px 10px;font-family:inherit;font-size:13px;color:var(--text)';
     c.innerHTML = `
-      <div class="page-header"><div class="page-title">Histórico de aprobaciones</div><div class="page-sub">Todo lo que ya resolviste, en una ficha por persona: mensajes con su borrador creado, sesiones agendadas, y lo rechazado u omitido. Lo más reciente arriba. Lo pendiente o fallido sigue en <span style="cursor:pointer;text-decoration:underline" onclick="navTo('scheduled')">Mensajes programados</span> y <span style="cursor:pointer;text-decoration:underline" onclick="navTo('scheduling')">Agendamientos</span>.</div></div>
+      <div class="page-header"><div class="page-title">Histórico de aprobaciones</div><div class="page-sub">Todo lo que ya resolviste, en una ficha por persona: mensajes con su borrador creado, sesiones agendadas, y lo rechazado u omitido. Lo más reciente arriba. Lo pendiente o fallido sigue en <span style="cursor:pointer;text-decoration:underline" onclick="navTo('scheduled')">Mensajes programados</span> y <span style="cursor:pointer;text-decoration:underline" onclick="navTo('scheduling')">Agendamientos programados</span>.</div></div>
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
         <input id="hist-q" placeholder="🔎 Buscar por nombre…" style="${sel};flex:1;min-width:220px" value="${escapeHtml(histFilter.q)}" oninput="histFilter.q=this.value;drawHistory()">
         <select id="hist-type" style="${sel}" onchange="histFilter.type=this.value;drawHistory()">
@@ -473,8 +404,29 @@ function openReschedule(id) {
   navTo('scheduling');
 }
 
-function setPendingCount(n) {
-  const el = document.getElementById('nav-pending-count');
+// Draft preflight: Gmail, Slack bot, Claude + Slack connector. Checked at startup and before
+// each sync; shown before Junior approves so a broken dependency never surprises him.
+const HEALTH_LABEL = {gmail:'Gmail (correo)', slack_bot:'Bot de Slack', claude_slack:'Claude + conector de Slack'};
+const HEALTH_FIX = {gmail:"corre 'python setup_google_auth.py' en C:\PandaBearAgent", slack_bot:'revisa SLACK_BOT_TOKEN en .env',
+  claude_slack:'abre Claude Code en este PC y revisa tu sesión y el conector "claude.ai Slack"'};
+function draftHealthBanner(h) {
+  if (!h || h.ok) return '';
+  const bad = Object.entries(h.checks||{}).filter(([,c])=>!c.ok);
+  return `<div style="background:rgba(220,38,38,.08);border:1px solid var(--red);border-radius:12px;padding:14px 16px;margin-bottom:16px">
+    <div style="font-weight:700;color:var(--red);margin-bottom:6px">⚠️ Ahora mismo no se podrían crear algunos borradores — arréglalo antes de aprobar</div>
+    ${bad.map(([k,c])=>`<div style="font-size:13px;margin-top:4px">• <b>${HEALTH_LABEL[k]||k}</b>: ${escapeHtml(c.error||'no responde')} → ${escapeHtml(HEALTH_FIX[k]||'')}</div>`).join('')}
+    <div style="font-size:12px;color:var(--text3);margin-top:8px">Revisado ${fmtDateTime(h.checkedAt)} · <span style="cursor:pointer;text-decoration:underline" onclick="checkDraftsNow()">🔄 Comprobar ahora</span></div></div>`;
+}
+async function checkDraftsNow() {
+  showToast('<span class="spinner"></span> Comprobando Gmail, Slack y Claude…', 20000);
+  try { const h = await api('/agent/drafts/health', {method:'POST'}); showToast(h.ok ? '✅ Todo listo: los borradores se pueden crear.' : '⚠️ Hay algo que arreglar — mira el aviso.', 6000); }
+  catch(e) { showToast('❌ '+escapeHtml(e.message), 8000); }
+  refreshSyncStatus(); if (currentPage==='scheduled') renderScheduled();
+}
+
+function setPendingCount(n) { setCount('nav-pending-count', n); }
+function setCount(id, n) {
+  const el = document.getElementById(id);
   if (!el) return;
   el.textContent = n; el.style.display = n > 0 ? '' : 'none';
 }
@@ -482,12 +434,16 @@ function setPendingCount(n) {
 // Last successful sync (auto or manual), shown under the menu on every page.
 async function refreshSyncStatus() {
   try {
-    const [st, pend] = await Promise.all([api('/agent/sync/status'), api('/agent/scheduled-messages')]);
+    const [st, pend, health] = await Promise.all([api('/agent/sync/status'), api('/agent/scheduled-messages'), api('/agent/drafts/health').catch(()=>null)]);
     setPendingCount(pend.reduce((n,b)=>n+(b.messages||[]).length, 0));
     const next = st.nextRun ? new Date(st.nextRun).toLocaleString('es-CO',{weekday:'short',hour:'2-digit',minute:'2-digit'}) : '—';
     document.getElementById('sync-status').innerHTML =
       `🔄 Último sync exitoso:<br><b>${st.lastSuccess?fmtDateTime(st.lastSuccess):'nunca'}</b><br>` +
-      `<span style="color:#666">Automático: ${(st.times||[]).join(' · ')} (CO)<br>Próximo: ${next}</span>`;
+      `<span style="color:#666">Automático: ${(st.times||[]).join(' · ')} (CO)<br>Próximo: ${next}</span>` +
+      `<div style="margin-top:6px;cursor:pointer" onclick="checkDraftsNow()" title="Gmail, bot de Slack y Claude + conector de Slack. Clic para comprobar ahora.">✍️ Borradores: ${
+        !health ? '<span style="color:#666">sin revisar</span>'
+        : health.ok ? '<b style="color:var(--green)">✅ listos</b>'
+        : '<b style="color:var(--red)">⚠️ '+Object.entries(health.checks||{}).filter(([,c])=>!c.ok).map(([k])=>HEALTH_LABEL[k]||k).join(', ')+'</b>'}</div>`;
   } catch(e) {
     document.getElementById('sync-status').innerHTML = `🔄 Último sync: <span style="color:var(--red)">sin conexión</span>`;
   }
@@ -615,6 +571,7 @@ async function renderScheduling() {
     // or when it was opened from the history to be rescheduled.
     const mtgs = all.filter(m => ['pending_approval','failed','scheduling'].includes(m.status)
       || (m.missingHires||[]).length || m.id===focus);
+    setCount('nav-sched-count', mtgs.length);
     mtgs.forEach(initExtras);
     const days = [];
     mtgs.forEach(m => {
@@ -622,7 +579,7 @@ async function renderScheduling() {
       g.items.push(m); (m.hires||[]).forEach(h => g.people[h.batchId] = h);
     });
     c.innerHTML = `
-      <div class="page-header"><div class="page-title">Agendamientos</div><div class="page-sub">Las sesiones de onboarding de cada ingreso: HR, IT, Payroll (solo Colombia), Product Onboarding y First month. Panda Bear las propone teniendo en cuenta feriados, ausencias en BambooHR y calendarios ocupados. Nada se agenda hasta que tú le das <b>📅 Agendar</b>. Lo que agendas u omites sale de aquí y pasa al Histórico de aprobaciones.</div></div>
+      <div class="page-header"><div class="page-title">Agendamientos programados</div><div class="page-sub">Las sesiones de onboarding de cada ingreso: HR, IT, Payroll (solo Colombia), Product Onboarding y First month. Panda Bear las propone teniendo en cuenta feriados, ausencias en BambooHR y calendarios ocupados. Nada se agenda hasta que tú le das <b>📅 Agendar</b>. Lo que agendas u omites sale de aquí y pasa al Histórico de aprobaciones.</div></div>
       ${days.length===0 ? '<div class="section"><div class="empty"><div class="icon">📅</div>No hay sesiones por agendar.<br><small>Las ya agendadas están en el <span style="cursor:pointer;text-decoration:underline" onclick="navTo(\'approvals\')">Histórico de aprobaciones</span>.</small></div></div>'
         : days.map(g => `<div class="section" style="margin-bottom:22px">
             <div style="font-size:17px;font-weight:700;margin-bottom:4px">📅 Ingresan el ${fmtDate(g.date)}</div>
@@ -1049,9 +1006,10 @@ async function renderHires() {
   try {
     const hires = await api('/agent/recent-hires');
     c.innerHTML = `
-      <div class="page-header"><div class="page-title">Próximos ingresos</div><div class="page-sub">Ingresos de los próximos 60 días según BambooHR. El sync automático corre a las 8:00, 12:00 y 16:00 (hora Colombia); con ▶ Run Sync lo corres ya. El sync solo prepara mensajes en Mensajes programados: nunca envía ni crea borradores.</div></div>
+      <div class="page-header"><div class="page-title">Próximos ingresos</div><div class="page-sub">Ingresos de los próximos 60 días según BambooHR. El sync automático corre a las 8:00, 12:00 y 16:00 (hora Colombia); con ▶ Run Sync lo corres ya y con 🔄 Recargar solo vuelves a leer la lista. El sync solo prepara mensajes en Mensajes programados: nunca envía ni crea borradores.</div></div>
       <div class="btn-row">
         <button class="btn-primary" id="sync-btn" onclick="runSync(false)">▶ Run Sync</button>
+        <button class="btn-secondary" onclick="renderHires()" title="Vuelve a leer la lista de BambooHR sin correr el sync">🔄 Recargar</button>
         <button class="btn-secondary" id="dry-btn" onclick="runSync(true)">🔍 Dry Run</button>
       </div>
       <div class="section">

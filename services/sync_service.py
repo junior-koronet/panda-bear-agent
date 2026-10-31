@@ -35,13 +35,16 @@ class SyncService(ServiceBase):
     description = "Runs the agent's hire-detection cycle (run_sync) at fixed times each day."
 
     def __init__(self, agent, times: str = "08:00,12:00,16:00", timezone: str = "America/Bogota",
-                 lookback_days: int = 60, on_failure=None):
+                 lookback_days: int = 60, on_failure=None, on_before_run=None):
         super().__init__()
         self._agent = agent
         self._times = parse_times(times) or [(8, 0), (12, 0), (16, 0)]
         self._tz = ZoneInfo(timezone)
         self._lookback_days = lookback_days
         self._on_failure = on_failure  # callable(slot_label: str, error: str)
+        # Draft preflight (services/draft_health): at startup and before every
+        # scheduled sync, so a broken Gmail/Slack/Claude is caught before Junior approves.
+        self._on_before_run = on_before_run
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
         self._runs_completed: int = 0
@@ -131,7 +134,15 @@ class SyncService(ServiceBase):
 
     # ── Loop ───────────────────────────────────────────────────────
 
+    def _preflight(self) -> None:
+        if self._on_before_run:
+            try:
+                self._on_before_run()
+            except Exception as e:
+                print(f"[sync_service] Chequeo de borradores falló: {e}")
+
     def _loop(self) -> None:
+        self._preflight()
         if self._missed_slot():
             self._run_once(f"recuperación del de las {self.last_slot().strftime('%H:%M')}")
         while not self._stop_event.is_set():
@@ -142,6 +153,7 @@ class SyncService(ServiceBase):
             if self._stop_event.wait(min(max(wait, 0), 300)):
                 break
             if datetime.now(self._tz) >= self._next_run:
+                self._preflight()
                 self._run_once(f"de las {self._next_run.strftime('%H:%M')}")
 
     def _run_once(self, slot_label: str) -> None:
